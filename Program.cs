@@ -17,8 +17,7 @@ namespace MyApp
         public float[] embedding { get; set; }
         public float detConf { get; set; }
         public float faceWeight { get; set; }
-        public bool isBaseImage { get; set; }
-        
+
         public Guid VideoSourceId { get; set; }
     }
 
@@ -37,7 +36,7 @@ namespace MyApp
         public static string EventCollectionName = "demoCollection";
         private static MilvusClient _milvusClient;
         public static MilvusCollection _milvusCollection;
-        public static string deletionId ;
+        public static string deletionId;
 
         static async Task Main(string[] args)
         {
@@ -55,7 +54,7 @@ namespace MyApp
                 Id = File.ReadAllText(eventIdFileName).Trim();
                 Console.WriteLine($"File already exists. ID read from file: {Id}");
             }
-           
+
             string connectionStringFileName = "connection_string.txt";
 
             // Check if the file exists
@@ -110,7 +109,7 @@ namespace MyApp
                         FieldSchema.CreateVarchar("device_id", maxLength: 50)
                     }
                 };
-                
+
                 if (!await _milvusClient.HasCollectionAsync(EventCollectionName))
                 {
                     _milvusCollection = await _milvusClient.CreateCollectionAsync(EventCollectionName, schema,
@@ -207,9 +206,11 @@ namespace MyApp
                     {
                         if (item.detConf > 0.9 && item.faceWeight > 0.9)
                         {
-                            item.isBaseImage = true;
+                            if (await isEventToBeInserted(item))
+                            {
+                                eventsToBeinserted[item.TrackId] = item;
+                            }
                         }
-                        eventsToBeinserted[item.TrackId] = item;
                     }
 
                     await AddEventsToQueueAsync(eventsToBeinserted);
@@ -225,6 +226,40 @@ namespace MyApp
             }
 
             npgsqlConnection.Close();
+        }
+
+        public static async Task<bool> isEventToBeInserted(demofrs demofrs)
+        {
+            var parameters = new SearchParameters
+            {
+                OutputFields =
+                {
+                    "track_id",
+                    "event_id",
+                    "event_time"
+                },
+                ConsistencyLevel = ConsistencyLevel.Strong,
+                Offset = 0,
+                Expression =
+                    $"{EventProcessor.EventCollectionProperties.EventId} < '{demofrs.Id}' && {EventProcessor.EventCollectionProperties.isBaseImage} == true",
+                ExtraParameters = { ["ef"] = "130" }
+            };
+            List<ReadOnlyMemory<float>> embeddings = new List<ReadOnlyMemory<float>>()
+                { new ReadOnlyMemory<float>(demofrs.embedding.ToArray()) };
+
+
+            var searchResult = await Program._milvusCollection.SearchAsync(
+                EventProcessor.EventCollectionProperties.Embedding,
+                embeddings,
+                SimilarityMetricType.Ip, limit: 1, parameters);
+
+
+            if (searchResult is null || searchResult.Scores.Count < 1)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public static async Task<bool> AddEventsToQueueAsync(Dictionary<Guid, demofrs> eventsToBeinserted)
@@ -258,8 +293,7 @@ namespace MyApp
                         events.Select(x => x.Id.ToString()).ToList()),
                     FieldData.Create<long>($"{EventProcessor.EventCollectionProperties.EventTime}",
                         events.Select(x => x.ReceivedTime).ToList()),
-                    FieldData.Create<bool>($"{EventProcessor.EventCollectionProperties.isBaseImage}",
-                        events.Select(x => x.isBaseImage).ToList()),
+
                     FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",
                         events.Select(x => x.VideoSourceId.ToString()).ToList()),
