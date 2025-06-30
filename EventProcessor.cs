@@ -34,7 +34,6 @@ public static class EventProcessor
         public const string EventTime = "event_time";
         public const string EventId = "event_id";
         public const string Embedding = "embedding";
-        public const string isBaseImage = "is_base_image";
         public static string VideoSourceId = "device_id";
     }
 
@@ -187,7 +186,7 @@ public static class EventProcessor
                 },
                 ConsistencyLevel = ConsistencyLevel.Strong,
                 Offset = 0,
-                Expression = $"{EventCollectionProperties.EventId} < '{eventId}' && {EventCollectionProperties.isBaseImage} == true",
+                Expression = $"{EventCollectionProperties.EventId} < '{eventId}'",
                 ExtraParameters = { ["ef"] = "130" }
             };
 
@@ -294,13 +293,14 @@ public static class EventProcessor
         {
             groupId = Guid.NewGuid().ToString();
             clusterInfo.Add(groupId, new List<ReadOnlyMemory<float>>());
+            
         }
         
         clusterInfo[groupId].Add(embedding);
         groupInfos.Add((EventId: null, TrackId: null, EventTime: 0,
             GroupId: groupId));
     }
-    private static double InnerProduct(ReadOnlyMemory<float> vectorA, ReadOnlyMemory<float> vectorB)
+    public static double InnerProduct(ReadOnlyMemory<float> vectorA, ReadOnlyMemory<float> vectorB)
     {
         var spanA = vectorA.Span;
         var spanB = vectorB.Span;

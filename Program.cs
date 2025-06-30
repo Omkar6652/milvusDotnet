@@ -37,6 +37,10 @@ namespace MyApp
         private static MilvusClient _milvusClient;
         public static MilvusCollection _milvusCollection;
         public static string deletionId;
+        public static Dictionary<string, List<demofrs>> clusterInfo =
+            new Dictionary<string, List<demofrs>>();
+        private static float ConfidenceThreshold=0.9f;
+
 
         static async Task Main(string[] args)
         {
@@ -104,7 +108,6 @@ namespace MyApp
                         FieldSchema.CreateVarchar("track_id", maxLength: 50, isPrimaryKey: true),
                         FieldSchema.CreateVarchar("event_id", maxLength: 50),
                         FieldSchema.Create<long>("event_time"),
-                        FieldSchema.Create<bool>("is_base_image"),
                         FieldSchema.CreateFloatVector("embedding", dimension: 512),
                         FieldSchema.CreateVarchar("device_id", maxLength: 50)
                     }
@@ -128,7 +131,7 @@ namespace MyApp
                 // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Flat,
                 //     metricType: SimilarityMetricType.Ip,
                 //     extraParams: extraParams);
-                // await _milvusCollection.LoadAsync();
+                 await _milvusCollection.LoadAsync();
                 // Console.Write("Enter deletionId (GUID): ");
                 // string deletionId = Console.ReadLine()?.Trim();
                 //
@@ -148,7 +151,7 @@ namespace MyApp
                 // File.WriteAllText(eventIdFileName, Id);
                 // await ProcessIndexWork();
 
-                await EventProcessor.StartGroupIdWork(DbConnectionString);
+              await EventProcessor.StartGroupIdWork(DbConnectionString);
             }
             catch (Exception ex)
             {
@@ -190,7 +193,7 @@ namespace MyApp
                     var getFaceEventsFromDbQuery = "";
 
                     getFaceEventsFromDbQuery =
-                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"ReceivedTime\",\"detConf\", \"faceWeight\", \"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'   ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"ReceivedTime\",\"detConf\", \"faceWeight\", \"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'  and e.\"detConf\" > {ConfidenceThreshold} and e.\"faceWeight\" > {ConfidenceThreshold}  ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
 
 
                     var events = npgsqlConnection
@@ -202,16 +205,7 @@ namespace MyApp
                     }
 
                     Dictionary<Guid, demofrs> eventsToBeinserted = new();
-                    foreach (var item in events)
-                    {
-                        if (item.detConf > 0.9 && item.faceWeight > 0.9)
-                        {
-                            if (await isEventToBeInserted(item))
-                            {
-                                eventsToBeinserted[item.TrackId] = item;
-                            }
-                        }
-                    }
+                    eventsToBeinserted = await GetEventsToBeInserted(events);
 
                     await AddEventsToQueueAsync(eventsToBeinserted);
                     offset = offset + limit;
@@ -228,39 +222,143 @@ namespace MyApp
             npgsqlConnection.Close();
         }
 
-        public static async Task<bool> isEventToBeInserted(demofrs demofrs)
+        public static async Task<Dictionary<Guid, demofrs>> GetEventsToBeInserted(List<demofrs> events)
         {
-            var parameters = new SearchParameters
+            try
             {
-                OutputFields =
+               
+                if (!events.Any())
+                    return new Dictionary<Guid, demofrs>();
+
+                var embeddings = events
+                    .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
+                    .ToList();
+
+                var parameters = new SearchParameters
                 {
-                    "track_id",
-                    "event_id",
-                    "event_time"
-                },
-                ConsistencyLevel = ConsistencyLevel.Strong,
-                Offset = 0,
-                Expression =
-                    $"{EventProcessor.EventCollectionProperties.EventId} < '{demofrs.Id}' && {EventProcessor.EventCollectionProperties.isBaseImage} == true",
-                ExtraParameters = { ["ef"] = "130" }
-            };
-            List<ReadOnlyMemory<float>> embeddings = new List<ReadOnlyMemory<float>>()
-                { new ReadOnlyMemory<float>(demofrs.embedding.ToArray()) };
+                    OutputFields = { "track_id", "event_id", "event_time" },
+                    ConsistencyLevel = ConsistencyLevel.Strong,
+                    Offset = 0,
+                    ExtraParameters = { ["ef"] = "130" }
+                };
+
+                var searchResults = await Program._milvusCollection.SearchAsync(
+                    EventProcessor.EventCollectionProperties.Embedding,
+                    embeddings,
+                    SimilarityMetricType.Ip,
+                    limit: 1,
+                    parameters
+                );
+
+                var toInsert = new Dictionary<Guid, demofrs>();
+                for (int i = 0; i < events.Count; i++)
+                {
+                    if (ShouldInsertEvent(searchResults, i))
+                    {
+                        toInsert.TryAdd(events[i].TrackId, events[i]);
+                    }
+                }
+
+                var insert = PostProcessInsertion(toInsert);
+                return insert;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            return null;
+        }
+    
+        // private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
+        // {
+        //     if (!toInsert.Any())
+        //         return toInsert;
+        //     
+        //     var insert = new Dictionary<Guid, demofrs>();
+        //     var keys = toInsert.Keys.ToList(); 
+        //     int count = keys.Count;
+        //     var isInserted = new bool[count];  
+        //
+        //     for (int i = 0; i < count; i++)
+        //     {
+        //         if (isInserted[i])
+        //             continue;
+        //
+        //         var keyI = keys[i];
+        //         var embeddingI = toInsert[keyI].embedding;
+        //
+        //         for (int j = i + 1; j < count; j++) 
+        //         {
+        //             var keyJ = keys[j];
+        //             var embeddingJ = toInsert[keyJ].embedding;
+        //
+        //             var cosineSimilarity = EventProcessor.InnerProduct(embeddingI, embeddingJ);
+        //             if (cosineSimilarity > 0.5)
+        //             {
+        //                 isInserted[j] = true;
+        //             }
+        //         }
+        //
+        //         
+        //         insert.TryAdd(toInsert[keyI].TrackId, toInsert[keyI]);
+        //     }
+        //
+        //     return insert;
+        // }
+        
+        private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
+        {
+            if (!toInsert.Any())
+                return toInsert;
+            
+           
+
+            
+
+            var insert = new Dictionary<Guid, demofrs>();
+            var clusters = new List<ReadOnlyMemory<float>>();
+
+            foreach (var kvp in toInsert)
+            {
+                var currentEmbedding = kvp.Value.embedding;
+                bool matched = false;
+
+                for (int i = 0; i < clusters.Count; i++)
+                {
+                    var cosineSimilarity = EventProcessor.InnerProduct(currentEmbedding, clusters[i]);
+                    if (cosineSimilarity > 0.5)
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (!matched)
+                {
+                    clusters.Add(currentEmbedding);
+                    insert.TryAdd(kvp.Value.TrackId, kvp.Value);
+
+                }
+            }
+            
+
+            return insert;
+        }
 
 
-            var searchResult = await Program._milvusCollection.SearchAsync(
-                EventProcessor.EventCollectionProperties.Embedding,
-                embeddings,
-                SimilarityMetricType.Ip, limit: 1, parameters);
 
-
-            if (searchResult is null || searchResult.Scores.Count < 1)
+        private static bool ShouldInsertEvent(SearchResults searchResults, int index)
+        {
+            const float similarityThreshold = 0.5f;
+    
+            if (searchResults is null || searchResults.Scores.Count < 1)
             {
                 return true;
             }
 
-            return false;
+            return searchResults.Scores[index] < similarityThreshold;
         }
+        
 
         public static async Task<bool> AddEventsToQueueAsync(Dictionary<Guid, demofrs> eventsToBeinserted)
         {
