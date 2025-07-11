@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Diagnostics;
+using System.Text;
 using Dapper;
 using MassTransit;
 using Milvus.Client;
@@ -74,6 +75,8 @@ public static class EventProcessor
             
             while (true)
             {
+                Console.WriteLine("groupidassigning Log");
+                Stopwatch stopwatch = Stopwatch.StartNew();
                 var getFaceEventsFromDbQuery =
                     $"select e.\"Id\",e.\"embedding\" ::real[], e.\"TrackId\", e.\"ReceivedTime\" from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}' and e.\"ReceivedTime\" < {maxRec} ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
                 //Console.WriteLine(getFaceEventsFromDbQuery);
@@ -84,7 +87,21 @@ public static class EventProcessor
                 {
                     break;
                 }
+                foreach (var milvusEventSchemaParameterse in events)
+                {
+                    if (milvusEventSchemaParameterse.embedding == null ||
+                        milvusEventSchemaParameterse.embedding.Length == 0)
+                    {
+                        Console.WriteLine("No embedding found");
+                    }
 
+                    if (milvusEventSchemaParameterse.embedding is not float[] ||
+                        milvusEventSchemaParameterse.embedding.Length < 512)
+                    {
+                        Console.WriteLine("Embedding not found");
+                    }
+                    Console.WriteLine(milvusEventSchemaParameterse.embedding[0]);
+                }
 
                 // var embeddings = eventsToBeInsertedList.Select(e => new ReadOnlyMemory<float>(((Vector)e.EventProperties["embedding"]).ToArray())).ToList();
                 List<ReadOnlyMemory<float>> embeddings = events
@@ -102,11 +119,7 @@ public static class EventProcessor
 
                 for (int i = 0; i < eventGroupInfos.Count; i++)
                 {
-                    if (events[i].Id == Guid.Parse("08dd8e1e-4246-eef7-8ce9-ee329c900000"))
-                    {
-                        Console.WriteLine(i);
-                    }
-
+                 
                     var eventGroupInfo = eventGroupInfos[i];
                     if (eventGroupInfo.GroupId != null)
                     {
@@ -143,7 +156,10 @@ public static class EventProcessor
                 npgsqlConnection.Query(batchQueries.ToString());
                 offset = offset + limit;
                 processedEvent += events.Count;
-                Console.WriteLine("---------------- ProcessEventsNotHavingGroupIds in EventProcessor Done : " + processedEvent);
+                stopwatch.Stop();
+                var logstring = "---------------- ProcessEventsNotHavingGroupIds in EventProcessor Done : " + processedEvent + " Total time taken: " + stopwatch.Elapsed;
+                Console.WriteLine(logstring);
+                File.AppendAllTextAsync(Program.timelogTxt, logstring);
             }
         }
         catch (Exception ex)
@@ -187,9 +203,9 @@ public static class EventProcessor
                 ConsistencyLevel = ConsistencyLevel.Strong,
                 Offset = 0,
                 Expression = $"{EventCollectionProperties.EventId} < '{eventId}'",
-                ExtraParameters = { ["ef"] = "130" }
+                ExtraParameters = { ["ef"] = "130" },
             };
-
+           
             var searchResult = await Program._milvusCollection.SearchAsync(EventCollectionProperties.Embedding,
                 embeddings,
                 SimilarityMetricType.Ip, limit: 1, parameters);

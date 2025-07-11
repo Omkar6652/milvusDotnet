@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Text;
 using CommandLine;
 using Dapper;
@@ -24,6 +25,7 @@ namespace MyApp
 
     internal class Program
     {
+        public static string timelogTxt;
         private static int eventInsertedCount = 0;
         private static int eventUpdatedCount = 0;
 
@@ -88,6 +90,16 @@ namespace MyApp
                 MilvusIp = File.ReadAllText(milvusIpFileName);
                 Console.WriteLine($"File already exists. ID read from file: {MilvusIp}");
             }
+             timelogTxt = "timeLog.txt";
+
+            // Check if the file exists
+            if (!File.Exists(timelogTxt))
+            {
+                // Create the file and write text into it
+                File.AppendAllTextAsync(timelogTxt, Id);
+                Console.WriteLine("File created and text written.");
+            }
+           
 
             var startTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             try
@@ -145,13 +157,30 @@ namespace MyApp
                 // {
                 //     Console.WriteLine("Invalid GUID format. Please enter a valid GUID.");
                 // }
+               //
+               //  Console.WriteLine("Hello World! started milvusinsertion");
+               //  Stopwatch stopwatch = Stopwatch.StartNew();
+               //
+               //  await ProcessEventsNotHavingGroupIds();
+               //
+               //  stopwatch.Stop();
+               //
+               //  var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
+               //  Console.WriteLine(logstring);
+               // File.AppendAllTextAsync(timelogTxt, logstring);
+               //  File.WriteAllText(eventIdFileName, Id);
+               //  await ProcessIndexWork();
+         //       //
+                 Stopwatch stopwatch = Stopwatch.StartNew();
+           
+               await EventProcessor.StartGroupIdWork(DbConnectionString);
+           stopwatch.Stop();
+                        
+           var logstring = $"stopped groupidwork. Total time taken: {stopwatch.Elapsed}";
+         Console.WriteLine(logstring);
+         
+          File.AppendAllTextAsync(timelogTxt, logstring);
 
-                // Console.WriteLine("Hello World!");
-                //  await ProcessEventsNotHavingGroupIds();
-                // File.WriteAllText(eventIdFileName, Id);
-                // await ProcessIndexWork();
-
-              await EventProcessor.StartGroupIdWork(DbConnectionString);
             }
             catch (Exception ex)
             {
@@ -190,6 +219,9 @@ namespace MyApp
 
                 while (true)
                 {
+                    Console.WriteLine("pereventInsertion Log");
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+
                     var getFaceEventsFromDbQuery = "";
 
                     getFaceEventsFromDbQuery =
@@ -211,7 +243,10 @@ namespace MyApp
                     offset = offset + limit;
                     processedEvent += events.Count;
                     Id = events.Last().Id.ToString();
-                    Console.WriteLine("ProcessEventsNotHavingGroupIds Done : " + processedEvent);
+                    stopwatch.Stop();
+                    var logstring = "ProcessEventsNotHavingGroupIds Done : " + processedEvent + " Total time taken: " + stopwatch.Elapsed;
+                    Console.WriteLine(logstring);
+                    File.AppendAllTextAsync(timelogTxt, logstring);
                 }
             }
             catch (Exception ex)
@@ -239,7 +274,7 @@ namespace MyApp
                     OutputFields = { "track_id", "event_id", "event_time" },
                     ConsistencyLevel = ConsistencyLevel.Strong,
                     Offset = 0,
-                    ExtraParameters = { ["ef"] = "130" }
+                    ExtraParameters = { ["ef"] = "130" },
                 };
 
                 var searchResults = await Program._milvusCollection.SearchAsync(
