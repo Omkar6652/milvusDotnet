@@ -53,3 +53,4 @@ C:\Users\pomka\Downloads\milvusdotnet\obj\net7.0\refint\milvusdotnet.dll
 C:\Users\pomka\Downloads\milvusdotnet\obj\net7.0\milvusdotnet.pdb
 C:\Users\pomka\Downloads\milvusdotnet\obj\net7.0\milvusdotnet.genruntimeconfig.cache
 C:\Users\pomka\Downloads\milvusdotnet\obj\net7.0\ref\milvusdotnet.dll
+C:\Users\pomka\Downloads\milvusdotnet\obj\net7.0\milvusdotnet.sourcelink.json

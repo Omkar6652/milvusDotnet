@@ -41,7 +41,6 @@ namespace MyApp
         public static string deletionId;
         public static Dictionary<string, List<demofrs>> clusterInfo =
             new Dictionary<string, List<demofrs>>();
-        private static float ConfidenceThreshold=0.9f;
 
 
         static async Task Main(string[] args)
@@ -161,19 +160,19 @@ namespace MyApp
                //  Console.WriteLine("Hello World! started milvusinsertion");
                //  Stopwatch stopwatch = Stopwatch.StartNew();
                //
-               //  await ProcessEventsNotHavingGroupIds();
+               await ProcessEventsNotHavingGroupIds();
                //
                //  stopwatch.Stop();
                //
-               //  var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
+                // var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
                //  Console.WriteLine(logstring);
                // File.AppendAllTextAsync(timelogTxt, logstring);
                //  File.WriteAllText(eventIdFileName, Id);
-               //  await ProcessIndexWork();
-         //       //
+                await ProcessIndexWork();
+               //
                  Stopwatch stopwatch = Stopwatch.StartNew();
            
-               await EventProcessor.StartGroupIdWork(DbConnectionString);
+             //  await EventProcessor.StartGroupIdWork(DbConnectionString);
            stopwatch.Stop();
                         
            var logstring = $"stopped groupidwork. Total time taken: {stopwatch.Elapsed}";
@@ -225,7 +224,7 @@ namespace MyApp
                     var getFaceEventsFromDbQuery = "";
 
                     getFaceEventsFromDbQuery =
-                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"ReceivedTime\",\"detConf\", \"faceWeight\", \"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'  and e.\"detConf\" > {ConfidenceThreshold} and e.\"faceWeight\" > {ConfidenceThreshold}  ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"ReceivedTime\",\"detConf\", \"faceWeight\", \"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
 
 
                     var events = npgsqlConnection
@@ -288,14 +287,14 @@ namespace MyApp
                 var toInsert = new Dictionary<Guid, demofrs>();
                 for (int i = 0; i < events.Count; i++)
                 {
-                    if (ShouldInsertEvent(searchResults, i))
-                    {
+                    // if (ShouldInsertEvent(searchResults, i))
+                    // {
                         toInsert.TryAdd(events[i].TrackId, events[i]);
-                    }
+                   // }
                 }
 
-                var insert = PostProcessInsertion(toInsert);
-                return insert;
+             //   var insert = PostProcessInsertion(toInsert);
+                return toInsert;
             }
             catch (Exception ex)
             {
@@ -431,6 +430,21 @@ namespace MyApp
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",
                         events.Select(x => x.VideoSourceId.ToString()).ToList()),
                 });
+              var keys =  eventsToBeinserted.Keys.ToList();
+              var formattedKeys = string.Join(", ", keys.Select(k => $"\"{k}\""));
+              var expression = $"{EventProcessor.EventCollectionProperties.TrackId} in [{formattedKeys}]";
+              QueryParameters queryParameters = new QueryParameters
+              {
+                  OutputFields = { EventProcessor.EventCollectionProperties.EventId }
+              };
+              var result = await _milvusCollection.QueryAsync(
+                  expression: expression,parameters: queryParameters
+              );
+        var finalresu=      result.Select(e => e.FieldName == EventProcessor.EventCollectionProperties.TrackId).ToList();
+              if (result is null || result.Count == 0 || finalresu.Count!= eventsToBeinserted.Count)
+              {
+                  Console.WriteLine("Not found one of the required trackids");
+              }
                 return true;
             }
             catch (Exception ex)
