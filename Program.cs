@@ -423,8 +423,7 @@ namespace MyApp
                         events.Select(x => x.TrackId.ToString()).ToList()),
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.EventId}",
                         events.Select(x => x.Id.ToString()).ToList()),
-                    FieldData.Create<long>($"{EventProcessor.EventCollectionProperties.EventTime}",
-                        events.Select(x => x.ReceivedTime).ToList()),
+           
 
                     FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",

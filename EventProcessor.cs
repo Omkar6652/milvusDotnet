@@ -32,7 +32,6 @@ public static class EventProcessor
     public static class EventCollectionProperties
     {
         public const string TrackId = "track_id";
-        public const string EventTime = "event_time";
         public const string EventId = "event_id";
         public const string Embedding = "embedding";
         public static string VideoSourceId = "device_id";
@@ -178,11 +177,11 @@ public static class EventProcessor
     public static Dictionary<string, List<ReadOnlyMemory<float>>> clusterInfo =
         new Dictionary<string, List<ReadOnlyMemory<float>>>();
 
-    public static List<(string EventId, string TrackId, long EventTime, string GroupId
+    public static List<(string EventId, string TrackId,  string GroupId
         )> groupInfos = new();
 
 
-   public static async Task<List<(string EventId, string TrackId, long EventTime, string GroupId)>>
+   public static async Task<List<(string EventId, string TrackId, string GroupId)>>
         CheckForEventGroupIdInBatch(IReadOnlyList<ReadOnlyMemory<float>> embeddings, Guid eventId)
     {
         eventTimes.Clear();
@@ -198,7 +197,7 @@ public static class EventProcessor
                 {
                     "track_id",
                     "event_id",
-                    "event_time"
+                    
                 },
                 ConsistencyLevel = ConsistencyLevel.Strong,
                 Offset = 0,
@@ -225,9 +224,7 @@ public static class EventProcessor
 
                 var eventIdsFieldData = resultGroupIds
                     .Where(x => x.FieldName == $"{EventCollectionProperties.EventId}").FirstOrDefault();
-                var eventTimeFieldData =
-                    searchResult.FieldsData.Where(x => x.FieldName == $"{EventCollectionProperties.EventTime}").FirstOrDefault();
-
+                
 
                 if (trackIdsFieldData is FieldData<string> trackIdFields)
                 {
@@ -240,10 +237,7 @@ public static class EventProcessor
                 }
 
 
-                if (eventTimeFieldData is FieldData<long> eventTimeFields)
-                {
-                    eventTimes = eventTimeFields.Data.ToList();
-                }
+             
 
 
                 ProcessSearchResults(embeddings, searchResult.Scores);
@@ -280,7 +274,6 @@ public static class EventProcessor
                 groupInfos.Add((
                     EventId: eventIds[i],
                     TrackId: trackIds[i],
-                    EventTime: eventTimes[i],
                     GroupId: null
                 ));
             }
@@ -313,7 +306,7 @@ public static class EventProcessor
         }
         
         clusterInfo[groupId].Add(embedding);
-        groupInfos.Add((EventId: null, TrackId: null, EventTime: 0,
+        groupInfos.Add((EventId: null, TrackId: null, 
             GroupId: groupId));
     }
     public static double InnerProduct(ReadOnlyMemory<float> vectorA, ReadOnlyMemory<float> vectorB)
