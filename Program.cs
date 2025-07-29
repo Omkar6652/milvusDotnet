@@ -7,6 +7,7 @@ using Dapper;
 using Milvus.Client;
 using Newtonsoft.Json;
 using Npgsql;
+using Serilog;
 
 namespace MyApp
 {
@@ -14,10 +15,8 @@ namespace MyApp
     {
         public Guid Id { get; set; }
         public Guid TrackId { get; set; }
-        public long ReceivedTime { get; set; }
+        public long Time { get; set; }
         public float[] embedding { get; set; }
-        public float detConf { get; set; }
-        public float faceWeight { get; set; }
 
         public Guid VideoSourceId { get; set; }
     }
@@ -26,6 +25,7 @@ namespace MyApp
     internal class Program
     {
         public static string timelogTxt;
+        public static string groupIdTimeLogText;
         private static int eventInsertedCount = 0;
         private static int eventUpdatedCount = 0;
 
@@ -90,12 +90,19 @@ namespace MyApp
                 Console.WriteLine($"File already exists. ID read from file: {MilvusIp}");
             }
              timelogTxt = "timeLog.txt";
+             groupIdTimeLogText = "groupIdTimeLog.txt";
 
             // Check if the file exists
             if (!File.Exists(timelogTxt))
             {
                 // Create the file and write text into it
                 File.AppendAllTextAsync(timelogTxt, Id);
+                Console.WriteLine("File created and text written.");
+            }
+            if (!File.Exists(groupIdTimeLogText))
+            {
+                // Create the file and write text into it
+                File.AppendAllTextAsync(groupIdTimeLogText, Id);
                 Console.WriteLine("File created and text written.");
             }
            
@@ -118,7 +125,6 @@ namespace MyApp
                     {
                         FieldSchema.CreateVarchar("track_id", maxLength: 50, isPrimaryKey: true),
                         FieldSchema.CreateVarchar("event_id", maxLength: 50),
-                        FieldSchema.Create<long>("event_time"),
                         FieldSchema.CreateFloatVector("embedding", dimension: 512),
                         FieldSchema.CreateVarchar("device_id", maxLength: 50)
                     }
@@ -134,11 +140,11 @@ namespace MyApp
                     _milvusCollection = _milvusClient.GetCollection(EventCollectionName);
                 }
 
-                var extraParams = new Dictionary<string, string> { { "M", "130" }, { "efConstruction", "660" } };
-                await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Hnsw,
-                    metricType: SimilarityMetricType.Ip,
-                    extraParams: extraParams);
-                // var extraParams = new Dictionary<string, string> {  { "nlist", "1024" }  };
+               // var extraParams = new Dictionary<string, string> { { "M", "130" }, { "efConstruction", "660" } };
+                // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Hnsw,
+                //     metricType: SimilarityMetricType.Ip,
+                //     extraParams: extraParams);
+                var extraParams = new Dictionary<string, string> {  { "nlist", "1024" }  };
                 // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Flat,
                 //     metricType: SimilarityMetricType.Ip,
                 //     extraParams: extraParams);
@@ -157,28 +163,29 @@ namespace MyApp
                 //     Console.WriteLine("Invalid GUID format. Please enter a valid GUID.");
                 // }
                //
-               //  Console.WriteLine("Hello World! started milvusinsertion");
-               //  Stopwatch stopwatch = Stopwatch.StartNew();
-               //
+               Console.WriteLine("Hello World! started milvusinsertion");
+               Stopwatch stopwatch = Stopwatch.StartNew();
+               
                await ProcessEventsNotHavingGroupIds();
-               //
-               //  stopwatch.Stop();
-               //
-                // var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
-               //  Console.WriteLine(logstring);
-               // File.AppendAllTextAsync(timelogTxt, logstring);
-               //  File.WriteAllText(eventIdFileName, Id);
-                await ProcessIndexWork();
-               //
-                 Stopwatch stopwatch = Stopwatch.StartNew();
-           
-             //  await EventProcessor.StartGroupIdWork(DbConnectionString);
-           stopwatch.Stop();
-                        
-           var logstring = $"stopped groupidwork. Total time taken: {stopwatch.Elapsed}";
-         Console.WriteLine(logstring);
-         
-          File.AppendAllTextAsync(timelogTxt, logstring);
+               
+               stopwatch.Stop();
+               
+                var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
+                Console.WriteLine(logstring);
+               File.AppendAllTextAsync(timelogTxt, logstring);
+                File.WriteAllText(eventIdFileName, Id);
+                
+              await ProcessIndexWork();
+               
+         //       Stopwatch stopswatch = Stopwatch.StartNew();
+         //   
+         //     await EventProcessor.StartGroupIdWork(DbConnectionString);
+         //     stopswatch.Stop();
+         //                
+         // var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
+         // Console.WriteLine(groupidLogString);
+         //
+         //  File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
 
             }
             catch (Exception ex)
@@ -224,7 +231,7 @@ namespace MyApp
                     var getFaceEventsFromDbQuery = "";
 
                     getFaceEventsFromDbQuery =
-                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"ReceivedTime\",\"detConf\", \"faceWeight\", \"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"Time\", e.\"VideoSourceId\"  from events.\"eventsbak\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
 
 
                     var events = npgsqlConnection
@@ -270,10 +277,10 @@ namespace MyApp
 
                 var parameters = new SearchParameters
                 {
-                    OutputFields = { "track_id", "event_id", "event_time" },
+                    OutputFields = { "track_id", "event_id",  },
                     ConsistencyLevel = ConsistencyLevel.Strong,
                     Offset = 0,
-                    ExtraParameters = { ["ef"] = "130" },
+                    ExtraParameters = { ["nprobe"] = "128" },
                 };
 
                 var searchResults = await Program._milvusCollection.SearchAsync(
@@ -429,25 +436,14 @@ namespace MyApp
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",
                         events.Select(x => x.VideoSourceId.ToString()).ToList()),
                 });
-              var keys =  eventsToBeinserted.Keys.ToList();
-              var formattedKeys = string.Join(", ", keys.Select(k => $"\"{k}\""));
-              var expression = $"{EventProcessor.EventCollectionProperties.TrackId} in [{formattedKeys}]";
-              QueryParameters queryParameters = new QueryParameters
-              {
-                  OutputFields = { EventProcessor.EventCollectionProperties.EventId }
-              };
-              var result = await _milvusCollection.QueryAsync(
-                  expression: expression,parameters: queryParameters
-              );
-        var finalresu=      result.Select(e => e.FieldName == EventProcessor.EventCollectionProperties.TrackId).ToList();
-              if (result is null || result.Count == 0 || finalresu.Count!= eventsToBeinserted.Count)
-              {
-                  Console.WriteLine("Not found one of the required trackids");
-              }
+            
+             
+            
                 return true;
             }
             catch (Exception ex)
             {
+                Log.Error(ex.Message);
                 return false;
             }
         }

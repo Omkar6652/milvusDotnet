@@ -22,10 +22,10 @@ public static class EventProcessor
     public static string demoReportLastId = "demoReportLastId";
 
     private static string updateWithNewGroupIdsBaseQuery =
-        $"UPDATE events.\"Face_Recognition\" set \"GroupId\" = temp_updates.groupId::uuid FROM temp_updates WHERE events.\"Face_Recognition\".\"Id\"::uuid = temp_updates.id::uuid;\n";
+        $"UPDATE events.\"eventsbak\" set \"GroupId\" = temp_updates.groupId::uuid FROM temp_updates WHERE events.\"eventsbak\".\"Id\"::uuid = temp_updates.id::uuid;\n";
 
     private static string updateWithExistingGroupIdsBaseQuery =
-        $"UPDATE events.\"Face_Recognition\" set \"GroupId\" = (select f.\"GroupId\" from events.\"Face_Recognition\" as f where f.\"Id\" = temp_updates.groupId::UUID limit 1) FROM temp_updates WHERE events.\"Face_Recognition\".\"Id\"::uuid = temp_updates.id::uuid;\n";
+        $"UPDATE events.\"eventsbak\" set \"GroupId\" = (select f.\"GroupId\" from events.\"eventsbak\" as f where f.\"Id\" = temp_updates.groupId::UUID limit 1) FROM temp_updates WHERE events.\"eventsbak\".\"Id\"::uuid = temp_updates.id::uuid;\n";
 
     private static NpgsqlConnection npgsqlConnection;
 
@@ -77,7 +77,7 @@ public static class EventProcessor
                 Console.WriteLine("groupidassigning Log");
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 var getFaceEventsFromDbQuery =
-                    $"select e.\"Id\",e.\"embedding\" ::real[], e.\"TrackId\", e.\"ReceivedTime\" from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}' and e.\"ReceivedTime\" < {maxRec} ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                    $"select e.\"Id\",e.\"embedding\" ::real[], e.\"TrackId\", e.\"ReceivedTime\" from events.\"eventsbak\" as e where e.\"Id\">'{Id}' and e.\"ReceivedTime\" < {maxRec} ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
                 //Console.WriteLine(getFaceEventsFromDbQuery);
                 var events = npgsqlConnection
                     .Query<MilvusEventSchemaParameters>(getFaceEventsFromDbQuery)
@@ -202,7 +202,7 @@ public static class EventProcessor
                 ConsistencyLevel = ConsistencyLevel.Strong,
                 Offset = 0,
                 Expression = $"{EventCollectionProperties.EventId} < '{eventId}'",
-                ExtraParameters = { ["ef"] = "130" },
+                ExtraParameters = { ["nprobe"] = "128" },
             };
            
             var searchResult = await Program._milvusCollection.SearchAsync(EventCollectionProperties.Embedding,

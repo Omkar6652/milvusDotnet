@@ -1,1 +1,1 @@
-User ID=postgres;Password=analytic_server;Host=192.168.5.25;Port=5432;Database=igrreal;Pooling=true;Include Error Detail=true;
+User ID=postgres;Password=analytic_server;Host=192.168.1.33;Port=5432;Database=igrbackup;Pooling=true;Include Error Detail=true;
