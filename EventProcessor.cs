@@ -1,125 +1,88 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
+using Qdrant.Client;
+using Qdrant.Client.Grpc;
 using Dapper;
-using MassTransit;
-using Milvus.Client;
+using Google.Protobuf.Collections;
 using Npgsql;
-using Pgvector;
 using Serilog;
+using Range = Qdrant.Client.Grpc.Range;
 
 namespace MyApp;
 
 public static class EventProcessor
 {
-
-    public static List<ReadOnlyMemory<float>> embeddingDataReceived = new List<ReadOnlyMemory<float>>();
-  
- public static string Id = Guid.Empty.ToString();
-    public static List<long> eventTimes = new List<long>();
-    public static List<string> trackIds = new List<string>();
-    public static List<string> eventIds = new List<string>();
+    public static string Id = Guid.Empty.ToString();
     public static double FaceMatchThresholdValue = 0.5;
     public static string demoReportLastId = "demoReportLastId";
-
     private static string updateWithNewGroupIdsBaseQuery =
-        $"UPDATE events.\"eventsbak\" set \"GroupId\" = temp_updates.groupId::uuid FROM temp_updates WHERE events.\"eventsbak\".\"Id\"::uuid = temp_updates.id::uuid;\n";
+        $"UPDATE events.\"Face_Recognition\" set \"GroupId\" = temp_updates.groupId::uuid FROM temp_updates WHERE events.\"Face_Recognition\".\"Id\"::uuid = temp_updates.id::uuid;\n";
 
     private static string updateWithExistingGroupIdsBaseQuery =
-        $"UPDATE events.\"eventsbak\" set \"GroupId\" = (select f.\"GroupId\" from events.\"eventsbak\" as f where f.\"Id\" = temp_updates.groupId::UUID limit 1) FROM temp_updates WHERE events.\"eventsbak\".\"Id\"::uuid = temp_updates.id::uuid;\n";
-
-    private static NpgsqlConnection npgsqlConnection;
-
-    public static class EventCollectionProperties
-    {
-        public const string TrackId = "track_id";
-        public const string EventId = "event_id";
-        public const string Embedding = "embedding";
-        public static string VideoSourceId = "device_id";
-    }
+        $"UPDATE events.\"Face_Recognition\" set \"GroupId\" = (select f.\"GroupId\" from events.\"Face_Recognition\" as f where f.\"Id\" = temp_updates.groupId::UUID limit 1) FROM temp_updates WHERE events.\"Face_Recognition\".\"Id\"::uuid = temp_updates.id::uuid;\n";
 
     public static async Task StartGroupIdWork(string connectionString)
     {
-        NpgsqlConnection npgsqlConnection = new NpgsqlConnection(
-            connectionString
-        );
-        npgsqlConnection.Open();
-        
+        using var conn = new NpgsqlConnection(connectionString);
+        conn.Open();
+
         string selectQuery = @"SELECT ""Value"" FROM public.""SystemConfig"" WHERE ""Key"" = @key;";
-        string demoReportLastIdKey = "demoReportLastId";
+        var value = conn.QueryFirstOrDefault<string>(selectQuery, new { key = demoReportLastId });
 
-        var value = npgsqlConnection.QueryFirstOrDefault<string>(selectQuery, new { key = demoReportLastIdKey });
-        if (value == null)
+        if (string.IsNullOrEmpty(value))
         {
-            var newid = Guid.NewGuid();
-            string insertQuery = @"INSERT INTO public.""SystemConfig"" (""Id"",""Key"", ""Value"") VALUES (@Id,@key, @value);";
-             npgsqlConnection.QueryFirstOrDefault<string>(insertQuery, new {Id = newid, key = demoReportLastIdKey , value = Id });
+            var newId = Guid.NewGuid();
+            string insertQuery =
+                @"INSERT INTO public.""SystemConfig"" (""Id"", ""Key"", ""Value"") VALUES (@Id, @key, @value);";
+            conn.Execute(insertQuery, new { Id = newId, key = demoReportLastId, value = Id });
         }
-        if (!string.IsNullOrEmpty(value))
+        else
         {
-            Id = value; 
+            Id = value;
         }
 
-        await assignGroupIdsToEvents(npgsqlConnection);
-        npgsqlConnection.Close();
+        await assignGroupIdsToEvents(conn);
+        conn.Close();
     }
 
-    private static async Task assignGroupIdsToEvents(NpgsqlConnection npgsqlConnection)
-    {try
+    private static async Task assignGroupIdsToEvents(NpgsqlConnection conn)
+    {
+        var currentTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        var maxRec = currentTime - 7200000; // 2 hours ago
+        var processed = 0;
+        var limit = 500;
+
+        while (true)
         {
-            var currentTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            var maxRec = currentTime - 7200000;
-            var processedEvent = 0;
-            var limit = 500;
-            var offset = 0;
-            
-            while (true)
-            {
-                Console.WriteLine("groupidassigning Log");
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                var getFaceEventsFromDbQuery =
-                    $"select e.\"Id\",e.\"embedding\" ::real[], e.\"TrackId\", e.\"ReceivedTime\" from events.\"eventsbak\" as e where e.\"Id\">'{Id}' and e.\"ReceivedTime\" < {maxRec} ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
-                //Console.WriteLine(getFaceEventsFromDbQuery);
-                var events = npgsqlConnection
-                    .Query<MilvusEventSchemaParameters>(getFaceEventsFromDbQuery)
-                    .ToList();
-                if (events.Count == 0)
-                {
-                    break;
-                }
-                foreach (var milvusEventSchemaParameterse in events)
-                {
-                    if (milvusEventSchemaParameterse.embedding == null ||
-                        milvusEventSchemaParameterse.embedding.Length == 0)
-                    {
-                        Console.WriteLine("No embedding found");
-                    }
+            var query = $@"
+                    SELECT ""Id"", ""embedding""::real[], ""TrackId"", ""Time""
+                    FROM events.""Face_Recognition""
+                    WHERE ""Id"" > '{Id}' AND ""Time"" < {maxRec}
+                    ORDER BY ""Id"" ASC
+                    LIMIT {limit};";
 
-                    if (milvusEventSchemaParameterse.embedding is not float[] ||
-                        milvusEventSchemaParameterse.embedding.Length < 512)
-                    {
-                        Console.WriteLine("Embedding not found");
-                    }
-                    Console.WriteLine(milvusEventSchemaParameterse.embedding[0]);
-                }
+            var events = conn.Query<demofrs>(query).ToList();
+            if (events.Count == 0) break;
 
-                // var embeddings = eventsToBeInsertedList.Select(e => new ReadOnlyMemory<float>(((Vector)e.EventProperties["embedding"]).ToArray())).ToList();
-                List<ReadOnlyMemory<float>> embeddings = events
-                    .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
-                    .ToList();
-                var eventGroupInfos = await CheckForEventGroupIdInBatch(
-                    embeddings, events.First().Id
-                );
-                var updateWithNewGuidQueries = new StringBuilder();
+            var embeddings = events.Select(e => e.embedding).ToList();
+            var groupInfos = await CheckForEventGroupIdInBatch(embeddings, events.First().Time);
+
+             var updateWithNewGuidQueries = new StringBuilder();
                 var updateWithNewGuidqueryList = new List<string>();
                 updateWithNewGuidQueries.Append("with temp_updates (id, groupId) As ( Values ");
                 var updateWithExistingGuidQueries = new StringBuilder();
                 var updateWithExistingGuidqueryList = new List<string>();
                 updateWithExistingGuidQueries.Append("with temp_updates (id, groupId) As ( Values ");
 
-                for (int i = 0; i < eventGroupInfos.Count; i++)
+                for (int i = 0; i < groupInfos.Count; i++)
                 {
                  
-                    var eventGroupInfo = eventGroupInfos[i];
+                    var eventGroupInfo = groupInfos[i];
                     if (eventGroupInfo.GroupId != null)
                     {
                         updateWithNewGuidqueryList.Add($"(\'{events[i].Id}\', \'{eventGroupInfo.GroupId}\')");
@@ -152,181 +115,165 @@ public static class EventProcessor
                 batchQueries.Append(
                     $"UPDATE public.\"SystemConfig\" SET \"Value\"= '{Id}' WHERE \"Key\" = '{demoReportLastId}';");
                 //Log.Error(batchQueries.ToString());
-                npgsqlConnection.Query(batchQueries.ToString());
-                offset = offset + limit;
-                processedEvent += events.Count;
-                stopwatch.Stop();
-                var logstring = "---------------- ProcessEventsNotHavingGroupIds in EventProcessor Done : " + processedEvent + " Total time taken: " + stopwatch.Elapsed;
-                Console.WriteLine(logstring);
-                File.AppendAllTextAsync(Program.timelogTxt, logstring);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("error in [UpdateGuidInEvents] of [UniquepeopleReportManager] " + ex.Message);
+            _ =    conn.Query(batchQueries.ToString());
+                processed += events.Count;
         }
     }
 
-    private static void ProcessEmptyResults(IReadOnlyList<ReadOnlyMemory<float>> embeddings)
+    public static List<(string EventId, string TrackId, string GroupId)> groupInfos = new();
+    public static Dictionary<string, List<float[]>> clusterInfo = new();
+
+    public static async Task<List<(string EventId, string TrackId, string GroupId)>> CheckForEventGroupIdInBatch(
+        List<float[]> embeddings, long eventTime)
     {
-        for (int i = 0; i < embeddings.Count; i++)
-        {
-            MaintainCluster(embeddings[i]);
-        }
-    }
-    public static Dictionary<string, List<ReadOnlyMemory<float>>> clusterInfo =
-        new Dictionary<string, List<ReadOnlyMemory<float>>>();
-
-    public static List<(string EventId, string TrackId,  string GroupId
-        )> groupInfos = new();
-
-
-   public static async Task<List<(string EventId, string TrackId, string GroupId)>>
-        CheckForEventGroupIdInBatch(IReadOnlyList<ReadOnlyMemory<float>> embeddings, Guid eventId)
-    {
-        eventTimes.Clear();
-        trackIds.Clear();
-        clusterInfo.Clear();
         groupInfos.Clear();
-        eventIds.Clear();
-        try
+        clusterInfo.Clear();
+
+        var searchPointsList = new List<SearchPoints>();
+
+        foreach (var embedding in embeddings)
         {
-            var parameters = new SearchParameters
+            // Ensure embedding is a float array for RepeatedField
+            float[] vectorArray = embedding.ToArray(); // Or handle ReadOnlyMemory.Span if preferred
+
+            var searchRequest = new SearchPoints
             {
-                OutputFields =
+                CollectionName = Program.EventCollectionName, // Set collection name for each request
+                Vector = { vectorArray }, // RepeatedField<float> accepts IEnumerable<float>
+                Limit = 1,
+                WithPayload = true, // Assuming you need payload data back
+                // WithVectors = false, // Add if you need vector data back
+                Params = new SearchParams { HnswEf = (ulong)Program.Ef }, // Set HNSW ef parameter
+                // Create the Filter object
+                Filter = new Filter
                 {
-                    "track_id",
-                    "event_id",
-                    
-                },
-                ConsistencyLevel = ConsistencyLevel.Strong,
-                Offset = 0,
-                Expression = $"{EventCollectionProperties.EventId} < '{eventId}'",
-                ExtraParameters = { ["nprobe"] = "128" },
+                    // Add conditions to the 'Must' list for AND logic
+                    Must =
+                    {
+                        new Condition
+                        {
+                            Field = new FieldCondition
+                            {
+                                Key = "time", // Use the correct payload key (no "payload." prefix in Qdrant gRPC filters)
+                                Range = new Range { Lt = (double)eventTime } // Lt for Less Than (use double)
+                            }
+                        }
+                        // Add more conditions to 'Must' if needed
+                    }
+                    // Use 'Should' for OR logic, 'MustNot' for NOT logic if needed
+                }
+                // Offset, ScoreThreshold, etc. can be set here if required
             };
-           
-            var searchResult = await Program._milvusCollection.SearchAsync(EventCollectionProperties.Embedding,
-                embeddings,
-                SimilarityMetricType.Ip, limit: 1, parameters);
+
+            searchPointsList.Add(searchRequest);
+        }
+
+        Stopwatch sw = Stopwatch.StartNew();
+        // 2. Execute the batch search using the QdrantClient instance method
+        // This is the correct signature for Qdrant.Client v1.12.0
+        var batchResults = await Program._qdrantClient.SearchBatchAsync(
+            collectionName: Program
+                .EventCollectionName, // Collection name (often set per request, but method requires it)
+            searches: searchPointsList, // The list of SearchPoints requests
+            readConsistency: null, // Optional: ReadConsistency
+            timeout: null, // Optional: Timeout
+            cancellationToken: default // Optional: Cancellation Token
+        );
 
 
-            if (searchResult is null || searchResult.Scores.Count < 1)
+        sw.Stop();
+        Console.WriteLine(sw.Elapsed + ": Elapsed while searching qdrant in batch");
+
+        for (int i = 0; i < batchResults.Count; i++)
+        {
+            var batchResult = batchResults[i]; // This is a BatchResult for embeddings[i]
+            var emb = embeddings[i]; // The original embedding
+
+            // Check if any results were returned for this specific embedding's search
+            // and if the best score meets or exceeds the threshold.
+            if (batchResult.Result.Count == 0 || batchResult.Result[0].Score < FaceMatchThresholdValue)
             {
-                // Handle empty results more explicitly
-                ProcessEmptyResults(embeddings);
+                // Case 1: No results found, or
+                // Case 2: Best result's score is below the threshold.
+                // In either case, consider it a new, unique item.
+                MaintainCluster(emb);
             }
             else
             {
-                var resultGroupIds = searchResult.FieldsData;
+                // Case 3: A result was found with a score >= threshold.
+                // Use the GroupId/EventId from the matched point.
+                var topMatchedPoint = batchResult.Result[0]; // The best match
+                var payload = topMatchedPoint.Payload; // Its payload dictionary
 
-                var trackIdsFieldData = resultGroupIds
-                    .Where(x => x.FieldName == $"{EventCollectionProperties.TrackId}").FirstOrDefault();
+                // Safely extract payload values
+                string eventId = "N/A"; // Default if not found
+                string trackId = "N/A"; // Default if not found
 
-                var eventIdsFieldData = resultGroupIds
-                    .Where(x => x.FieldName == $"{EventCollectionProperties.EventId}").FirstOrDefault();
-                
-
-                if (trackIdsFieldData is FieldData<string> trackIdFields)
+                if (payload != null) // Check if payload exists
                 {
-                    trackIds = trackIdFields.Data.ToList();
+                    // Use TryGetValue for safety
+                    if (payload.TryGetValue("event_id", out var eventIdValue))
+                    {
+                        eventId = eventIdValue.StringValue ?? "N/A"; // Assuming it's stored as a string
+                    }
+
+                    if (payload.TryGetValue("track_id", out var trackIdValue))
+                    {
+                        trackId = trackIdValue.StringValue ?? "N/A"; // Assuming it's stored as a string
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"payload was null");
                 }
 
-                if (eventIdsFieldData is FieldData<string> eventIdFields)
-                {
-                    eventIds = eventIdFields.Data.ToList();
-                }
-
-
-             
-
-
-                ProcessSearchResults(embeddings, searchResult.Scores);
+                // Add to groupInfos, indicating it should use the GroupId from eventId
+                // (You might need to adjust the logic here based on whether eventId or GroupId is the key you need)
+                groupInfos.Add((
+                    EventId: eventId, // ID of the matched point
+                    TrackId: trackId, // TrackId of the matched point
+                    GroupId: null // Signal that the GroupId should be copied from EventId's record
+                ));
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("Exception occuredd" + ex.Message);
-            ProcessEmptyResults(embeddings);
         }
 
         return groupInfos;
     }
 
 
-    private static void ProcessSearchResults(IReadOnlyList<ReadOnlyMemory<float>> embeddings,
-        IReadOnlyList<float> scores)
+    private static void MaintainCluster(float[] embedding)
     {
-        // Use a faster for loop with direct indexing
-        for (int i = 0; i < embeddings.Count; i++)
+        string bestGroupId = null;
+        double maxSim = 0.0;
+
+        foreach (var cluster in clusterInfo)
         {
-            // This check now just logs but doesn't block execution since we're only checking base images
-
-
-            if (scores[i] < FaceMatchThresholdValue)
+            foreach (var vec in cluster.Value)
             {
-                MaintainCluster(embeddings[i]);
-            }
-            else
-            {
-                // Pre-construct the tuple to avoid multiple allocations
-                //var indexstatus =  _milvusCollection.DescribeIndexAsync("embedding", "embedding").Result;
-
-                groupInfos.Add((
-                    EventId: eventIds[i],
-                    TrackId: trackIds[i],
-                    GroupId: null
-                ));
-            }
-        }
-    }
-
-
-    private static void MaintainCluster(ReadOnlyMemory<float> embedding)
-    {
-        string groupId = null;
-        double currentRecConf = 0.0;
-        foreach (var clusters in clusterInfo)
-        {
-            foreach (var cluster in clusters.Value)
-            {
-                var cosineSimilarity = InnerProduct(cluster, embedding);
-                if (cosineSimilarity > 0.5 && cosineSimilarity > currentRecConf)
+                var sim = InnerProduct(embedding, vec);
+                if (sim > 0.5 && sim > maxSim)
                 {
-                    currentRecConf = cosineSimilarity;
-                    groupId = clusters.Key;
+                    maxSim = sim;
+                    bestGroupId = cluster.Key;
                 }
             }
         }
 
-        if (groupId == null)
+        if (bestGroupId == null)
         {
-            groupId = Guid.NewGuid().ToString();
-            clusterInfo.Add(groupId, new List<ReadOnlyMemory<float>>());
-            
-        }
-        
-        clusterInfo[groupId].Add(embedding);
-        groupInfos.Add((EventId: null, TrackId: null, 
-            GroupId: groupId));
-    }
-    public static double InnerProduct(ReadOnlyMemory<float> vectorA, ReadOnlyMemory<float> vectorB)
-    {
-        var spanA = vectorA.Span;
-        var spanB = vectorB.Span;
-        double sum = 0;
-        for (int i = 0; i < spanA.Length; i++)
-        {
-            sum += spanA[i] * spanB[i];
+            bestGroupId = Guid.NewGuid().ToString();
+            clusterInfo[bestGroupId] = new List<float[]>();
         }
 
+        clusterInfo[bestGroupId].Add(embedding);
+        groupInfos.Add((EventId: null, TrackId: null, GroupId: bestGroupId));
+    }
+
+    public static double InnerProduct(float[] a, float[] b)
+    {
+        double sum = 0;
+        for (int i = 0; i < a.Length; i++)
+            sum += a[i] * b[i];
         return sum;
     }
-    
-}
-public class MilvusEventSchemaParameters
-{
-    public Guid Id { get; set; }
-    public Guid TrackId { get; set; }
-    public long ReceivedTime { get; set; }
-    public float[] embedding { get; set; }
 }

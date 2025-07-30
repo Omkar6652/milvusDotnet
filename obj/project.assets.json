@@ -501,6 +501,23 @@
           "lib/net6.0/Pgvector.EntityFrameworkCore.dll": {}
         }
       },
+      "Qdrant.Client/1.12.0": {
+        "type": "package",
+        "dependencies": {
+          "Google.Protobuf": "3.24.2",
+          "Grpc.Net.Client": "2.57.0"
+        },
+        "compile": {
+          "lib/net6.0/Qdrant.Client.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/net6.0/Qdrant.Client.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
       "runtime.native.System.Data.SqlClient.sni/4.7.0": {
         "type": "package",
         "dependencies": {
@@ -1467,6 +1484,29 @@
         "pgvector.entityframeworkcore.nuspec"
       ]
     },
+    "Qdrant.Client/1.12.0": {
+      "sha512": "qy3xm6SFM8xi8DcrxtIWuCZVwGLtbHLnuYQPw83wFOsvoHWnsHCyd2tl0mqqHaf/s03rnCGojc4u7StYgPYruA==",
+      "type": "package",
+      "path": "qdrant.client/1.12.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE",
+        "README.md",
+        "lib/net462/Qdrant.Client.dll",
+        "lib/net462/Qdrant.Client.pdb",
+        "lib/net462/Qdrant.Client.xml",
+        "lib/net6.0/Qdrant.Client.dll",
+        "lib/net6.0/Qdrant.Client.pdb",
+        "lib/net6.0/Qdrant.Client.xml",
+        "lib/netstandard2.0/Qdrant.Client.dll",
+        "lib/netstandard2.0/Qdrant.Client.pdb",
+        "lib/netstandard2.0/Qdrant.Client.xml",
+        "nuget-icon.png",
+        "qdrant.client.1.12.0.nupkg.sha512",
+        "qdrant.client.nuspec"
+      ]
+    },
     "runtime.native.System.Data.SqlClient.sni/4.7.0": {
       "sha512": "9kyFSIdN3T0qjDQ2R0HRXYIhS3l5psBzQi6qqhdLz+SzFyEy4sVxNOke+yyYv8Cu8rPER12c3RDjLT8wF3WBYQ==",
       "type": "package",
@@ -1994,6 +2034,7 @@
       "Pgvector >= 0.1.4",
       "Pgvector.Dapper >= 0.1.1",
       "Pgvector.EntityFrameworkCore >= 0.1.2",
+      "Qdrant.Client >= 1.12.0",
       "Serilog >= 3.0.2-dev-02044",
       "Serilog.Sinks.Console >= 4.1.0"
     ]
@@ -2083,6 +2124,10 @@
           "Pgvector.EntityFrameworkCore": {
             "target": "Package",
             "version": "[0.1.2, )"
+          },
+          "Qdrant.Client": {
+            "target": "Package",
+            "version": "[1.12.0, )"
           },
           "Serilog": {
             "target": "Package",

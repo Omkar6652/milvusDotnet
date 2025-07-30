@@ -17,6 +17,7 @@
           "Pgvector": "0.1.4",
           "Pgvector.Dapper": "0.1.1",
           "Pgvector.EntityFrameworkCore": "0.1.2",
+          "Qdrant.Client": "1.12.0",
           "Serilog": "3.0.2-dev-02044",
           "Serilog.Sinks.Console": "4.1.0"
         },
@@ -327,6 +328,18 @@
           "lib/net6.0/Pgvector.EntityFrameworkCore.dll": {
             "assemblyVersion": "0.1.2.0",
             "fileVersion": "0.1.2.0"
+          }
+        }
+      },
+      "Qdrant.Client/1.12.0": {
+        "dependencies": {
+          "Google.Protobuf": "3.25.3",
+          "Grpc.Net.Client": "2.61.0"
+        },
+        "runtime": {
+          "lib/net6.0/Qdrant.Client.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.12.0.0"
           }
         }
       },
@@ -671,6 +684,13 @@
       "sha512": "sha512-7HfV70Un5qxgIBFVzC+Lv66nlRdp2H6apYIiPUSGELYXY+DwbfJWCuLOA+ixLK4pSstKJtRVruSLcienfIL17w==",
       "path": "pgvector.entityframeworkcore/0.1.2",
       "hashPath": "pgvector.entityframeworkcore.0.1.2.nupkg.sha512"
+    },
+    "Qdrant.Client/1.12.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-qy3xm6SFM8xi8DcrxtIWuCZVwGLtbHLnuYQPw83wFOsvoHWnsHCyd2tl0mqqHaf/s03rnCGojc4u7StYgPYruA==",
+      "path": "qdrant.client/1.12.0",
+      "hashPath": "qdrant.client.1.12.0.nupkg.sha512"
     },
     "runtime.native.System.Data.SqlClient.sni/4.7.0": {
       "type": "package",

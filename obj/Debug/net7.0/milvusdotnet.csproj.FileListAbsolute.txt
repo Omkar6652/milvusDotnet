@@ -54,3 +54,4 @@ C:\Users\pomka\Downloads\milvusdotnet\obj\Debug\net7.0\milvusdotnet.pdb
 C:\Users\pomka\Downloads\milvusdotnet\obj\Debug\net7.0\milvusdotnet.genruntimeconfig.cache
 C:\Users\pomka\Downloads\milvusdotnet\obj\Debug\net7.0\ref\milvusdotnet.dll
 C:\Users\pomka\Downloads\milvusdotnet\obj\Debug\net7.0\milvusdotnet.sourcelink.json
+C:\Users\pomka\Downloads\milvusdotnet\bin\Debug\net7.0\Qdrant.Client.dll

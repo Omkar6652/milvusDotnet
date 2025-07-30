@@ -1,13 +1,10 @@
-﻿using System;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Text;
-using CommandLine;
+﻿using System.Diagnostics;
 using Dapper;
-using Milvus.Client;
-using Newtonsoft.Json;
+using Grpc.Net.Client;
 using Npgsql;
-using Serilog;
+using Qdrant.Client;
+using Qdrant.Client.Grpc;
+using Range = Qdrant.Client.Grpc.Range;
 
 namespace MyApp
 {
@@ -17,357 +14,276 @@ namespace MyApp
         public Guid TrackId { get; set; }
         public long Time { get; set; }
         public float[] embedding { get; set; }
-
         public Guid VideoSourceId { get; set; }
     }
 
-
     internal class Program
     {
-        public static string timelogTxt;
-        public static string groupIdTimeLogText;
+        public static string timelogTxt = "timeLog.txt";
+        public static string groupIdTimeLogText = "groupIdTimeLog.txt";
         private static int eventInsertedCount = 0;
         private static int eventUpdatedCount = 0;
-
         public static string Id = Guid.Empty.ToString();
-        public static string MilvusIp = "localhost";
+        public static string QdrantIp = "localhost";
 
         public static string DbConnectionString =
-            "User ID=postgres;Password=postgres;Host=localhost;Port=5438;Database=timescaledb;Pooling=true;Include Error Detail=true;";
+            "User ID=postgres;Password=postgres;Host=localhost;Port=5438;Database=timescaledb;Pooling=true;";
 
         public static string EventCollectionName = "demoCollection";
-        private static MilvusClient _milvusClient;
-        public static MilvusCollection _milvusCollection;
-        public static string deletionId;
-        public static Dictionary<string, List<demofrs>> clusterInfo =
-            new Dictionary<string, List<demofrs>>();
 
+        public static QdrantClient _qdrantClient;
+        public static string deletionId;
+
+        public static Dictionary<string, List<demofrs>> clusterInfo = new();
+
+        // 🔧 Configurable Parameters
+        public static int M = 130;
+        public static int EfConstruct = 660;
+        public static int Ef = 130;
+        public static float SimilarityThreshold = 0.5f; // For upsert logic
 
         static async Task Main(string[] args)
         {
-            string eventIdFileName = "last_event_id.txt";
+            LoadConfig("last_event_id.txt", ref Id);
+            LoadConfig("connection_string.txt", ref DbConnectionString);
+            LoadConfig("milvus_ip.txt", ref QdrantIp);
 
-            // Check if the file exists
-            if (!File.Exists(eventIdFileName))
-            {
-                // Create the file and write text into it
-                File.WriteAllText(eventIdFileName, Id);
-                Console.WriteLine("File created and text written.");
-            }
-            else
-            {
-                Id = File.ReadAllText(eventIdFileName).Trim();
-                Console.WriteLine($"File already exists. ID read from file: {Id}");
-            }
+            if (!File.Exists(timelogTxt)) File.WriteAllText(timelogTxt, "");
+            if (!File.Exists(groupIdTimeLogText)) File.WriteAllText(groupIdTimeLogText, "");
 
-            string connectionStringFileName = "connection_string.txt";
-
-            // Check if the file exists
-            if (!File.Exists(connectionStringFileName))
-            {
-                // Create the file and write text into it
-                File.WriteAllText(connectionStringFileName, DbConnectionString);
-                Console.WriteLine("File created and text written.");
-            }
-            else
-            {
-                DbConnectionString = File.ReadAllText(connectionStringFileName);
-                Console.WriteLine($"File already exists. ID read from file: {DbConnectionString}");
-            }
-
-            string milvusIpFileName = "milvus_ip.txt";
-
-            // Check if the file exists
-            if (!File.Exists(milvusIpFileName))
-            {
-                // Create the file and write text into it
-                File.WriteAllText(milvusIpFileName, MilvusIp);
-                Console.WriteLine("File created and text written.");
-            }
-            else
-            {
-                MilvusIp = File.ReadAllText(milvusIpFileName);
-                Console.WriteLine($"File already exists. ID read from file: {MilvusIp}");
-            }
-             timelogTxt = "timeLog.txt";
-             groupIdTimeLogText = "groupIdTimeLog.txt";
-
-            // Check if the file exists
-            if (!File.Exists(timelogTxt))
-            {
-                // Create the file and write text into it
-                File.AppendAllTextAsync(timelogTxt, Id);
-                Console.WriteLine("File created and text written.");
-            }
-            if (!File.Exists(groupIdTimeLogText))
-            {
-                // Create the file and write text into it
-                File.AppendAllTextAsync(groupIdTimeLogText, Id);
-                Console.WriteLine("File created and text written.");
-            }
-           
-
-            var startTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             try
             {
-                _milvusClient = new MilvusClient(MilvusIp, port: 19530);
-                //await _milvusClient.CreateDatabaseAsync("frs");
-                // var databases = await _milvusClient.ListDatabasesAsync();
-                //
-                // foreach (var database in databases)
-                // {
-                //     Console.WriteLine(database);
-                // }
+                _qdrantClient = new QdrantClient(QdrantIp, 6334 /*, apiKey: qdrantApiKey if supported directly */ /*, channelOptions if needed directly */);
 
-                var schema = new CollectionSchema
+                // ✅ Create collection if not exists
+                if (!await _qdrantClient.CollectionExistsAsync(EventCollectionName))
                 {
-                    Fields =
-                    {
-                        FieldSchema.CreateVarchar("track_id", maxLength: 50, isPrimaryKey: true),
-                        FieldSchema.CreateVarchar("event_id", maxLength: 50),
-                        FieldSchema.CreateFloatVector("embedding", dimension: 512),
-                        FieldSchema.CreateVarchar("device_id", maxLength: 50)
-                    }
-                };
+                    await _qdrantClient.CreateCollectionAsync(
+                        EventCollectionName,
+                        new VectorParams
+                        {
+                            Size = (ulong)512,
+                            Distance = Distance.Cosine
+                        });
 
-                if (!await _milvusClient.HasCollectionAsync(EventCollectionName))
-                {
-                    _milvusCollection = await _milvusClient.CreateCollectionAsync(EventCollectionName, schema,
-                        consistencyLevel: ConsistencyLevel.Strong);
-                }
-                else
-                {
-                    _milvusCollection = _milvusClient.GetCollection(EventCollectionName);
+                    Console.WriteLine("✅ Collection created with HNSW.");
                 }
 
-               // var extraParams = new Dictionary<string, string> { { "M", "130" }, { "efConstruction", "660" } };
-                // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Hnsw,
-                //     metricType: SimilarityMetricType.Ip,
-                //     extraParams: extraParams);
-                var extraParams = new Dictionary<string, string> {  { "nlist", "1024" }  };
-                // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Flat,
-                //     metricType: SimilarityMetricType.Ip,
-                //     extraParams: extraParams);
-                 await _milvusCollection.LoadAsync();
-                // Console.Write("Enter deletionId (GUID): ");
-                // string deletionId = Console.ReadLine()?.Trim();
-                //
-                // if (Guid.TryParse(deletionId, out Guid parsedGuid))
-                // {
-                //     string filter = $"event_id <  \"{parsedGuid}\"";
-                //     await _milvusCollection.DeleteAsync(filter);
-                //     Console.WriteLine("Delete operation submitted.");
-                // }
-                // else
-                // {
-                //     Console.WriteLine("Invalid GUID format. Please enter a valid GUID.");
-                // }
-               //
-               Console.WriteLine("Hello World! started milvusinsertion");
-               Stopwatch stopwatch = Stopwatch.StartNew();
-               
-               await ProcessEventsNotHavingGroupIds();
-               
-               stopwatch.Stop();
-               
-                var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
-                Console.WriteLine(logstring);
-               File.AppendAllTextAsync(timelogTxt, logstring);
-                File.WriteAllText(eventIdFileName, Id);
+                // ✅ Wait for collection to be ready
+                while ((await _qdrantClient.GetCollectionInfoAsync(EventCollectionName)).Status !=
+                       CollectionStatus.Green)
+                {
+                    Console.WriteLine("🟡 Waiting for collection to be ready...");
+                    await Task.Delay(1000);
+                }
+
+                Console.WriteLine("🚀 Hello World! Started qdrant insertion");
+                var stopwatch = Stopwatch.StartNew();
+                await ProcessEventsNotHavingGroupIds();
+                stopwatch.Stop();
                 
-              await ProcessIndexWork();
-               
-         //       Stopwatch stopswatch = Stopwatch.StartNew();
-         //   
-         //     await EventProcessor.StartGroupIdWork(DbConnectionString);
-         //     stopswatch.Stop();
-         //                
-         // var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
-         // Console.WriteLine(groupidLogString);
-         //
-         //  File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
-
+                var log = $"⏹️ Stopped qdrant insertion. Total time: {stopwatch.Elapsed}";
+                Console.WriteLine(log);
+                await File.AppendAllTextAsync(timelogTxt, log + Environment.NewLine);
+              
+              //  Save last processed ID
+               await File.WriteAllTextAsync("last_event_id.txt", Id);
+              
+               await ProcessIndexWork();
+                      Stopwatch stopswatch = Stopwatch.StartNew();
+                  
+                    await EventProcessor.StartGroupIdWork(DbConnectionString);
+                    stopswatch.Stop();
+                               
+                var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
+                Console.WriteLine(groupidLogString);
+                
+                 File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                Console.WriteLine("❌ Error: " + ex.Message);
+                Console.WriteLine(ex.StackTrace);
             }
+        }
 
-            var endTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Console.WriteLine($"TIME TAKEN {endTime - startTime}");
+        private static void LoadConfig(string fileName, ref string value)
+        {
+            if (!File.Exists(fileName))
+            {
+                File.WriteAllText(fileName, value);
+                Console.WriteLine($"📄 Created {fileName}: {value}");
+            }
+            else
+            {
+                value = File.ReadAllText(fileName).Trim();
+                Console.WriteLine($"📄 Loaded from {fileName}: {value}");
+            }
         }
 
         public static async Task ProcessIndexWork()
         {
-            var response = await _milvusCollection.DescribeIndexAsync("embedding", "embedding");
-            // Check the indexing status
-            while (response[0].PendingIndexRows != 0)
+            var info = await _qdrantClient.GetCollectionInfoAsync(EventCollectionName);
+            while (info?.IndexedVectorsCount < info?.VectorsCount)
             {
-                response = await _milvusCollection.DescribeIndexAsync("embedding", "embedding");
-                Console.WriteLine("rows left is " + response[0].PendingIndexRows);
-                Console.WriteLine("index done is " + response[0].IndexedRows);
-                Console.WriteLine("state is " + response[0].State);
-                await Task.Delay(5000);
+                info = await _qdrantClient.GetCollectionInfoAsync(EventCollectionName);
+                Console.WriteLine($"🔍 Indexing... {info.IndexedVectorsCount}/{info.VectorsCount}");
+                await Task.Delay(2000);
             }
+
+            Console.WriteLine("✅ Indexing complete.");
         }
 
         public static async Task ProcessEventsNotHavingGroupIds()
         {
-            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(
-                DbConnectionString
-            );
-            npgsqlConnection.Open();
-            try
+            using var conn = new NpgsqlConnection(DbConnectionString);
+            conn.Open();
+
+            var limit = 1000;
+            var processed = 0;
+
+            while (true)
             {
-                var processedEvent = 0;
-                var limit = 1000;
-                var offset = 0;
+                var query = $@"
+                    SELECT ""Id"", ""embedding""::real[], ""TrackId"", ""Time"", ""VideoSourceId""
+                    FROM events.""Face_Recognition""
+                    WHERE ""Id"" > '{Id}'
+                    ORDER BY ""Id"" ASC
+                    LIMIT {limit};";
 
-                while (true)
-                {
-                    Console.WriteLine("pereventInsertion Log");
-                    Stopwatch stopwatch = Stopwatch.StartNew();
+                var events = conn.Query<demofrs>(query).ToList();
+                if (events.Count == 0) break;
 
-                    var getFaceEventsFromDbQuery = "";
+                var toInsert = await GetEventsToBeInserted(events);
+                await AddEventsToQueueAsync(toInsert);
 
-                    getFaceEventsFromDbQuery =
-                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"Time\", e.\"VideoSourceId\"  from events.\"eventsbak\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                Id = events.Last().Id.ToString();
+                processed += events.Count;
 
-
-                    var events = npgsqlConnection
-                        .Query<demofrs>(getFaceEventsFromDbQuery)
-                        .ToList();
-                    if (events.Count == 0)
-                    {
-                        break;
-                    }
-
-                    Dictionary<Guid, demofrs> eventsToBeinserted = new();
-                    eventsToBeinserted = await GetEventsToBeInserted(events);
-
-                    await AddEventsToQueueAsync(eventsToBeinserted);
-                    offset = offset + limit;
-                    processedEvent += events.Count;
-                    Id = events.Last().Id.ToString();
-                    stopwatch.Stop();
-                    var logstring = "ProcessEventsNotHavingGroupIds Done : " + processedEvent + " Total time taken: " + stopwatch.Elapsed;
-                    Console.WriteLine(logstring);
-                    File.AppendAllTextAsync(timelogTxt, logstring);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
+                Console.WriteLine($"✅ Processed {processed} events");
             }
 
-            npgsqlConnection.Close();
+            conn.Close();
         }
 
-        public static async Task<Dictionary<Guid, demofrs>> GetEventsToBeInserted(List<demofrs> events)
-        {
-            try
-            {
-               
-                if (!events.Any())
-                    return new Dictionary<Guid, demofrs>();
+public static async Task<Dictionary<Guid, demofrs>> GetEventsToBeInserted(List<demofrs> events)
+{
+    if (!events.Any()) return new Dictionary<Guid, demofrs>();
 
-                var embeddings = events
-                    .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
-                    .ToList();
-
-                var parameters = new SearchParameters
-                {
-                    OutputFields = { "track_id", "event_id",  },
-                    ConsistencyLevel = ConsistencyLevel.Strong,
-                    Offset = 0,
-                    ExtraParameters = { ["nprobe"] = "128" },
-                };
-
-                var searchResults = await Program._milvusCollection.SearchAsync(
-                    EventProcessor.EventCollectionProperties.Embedding,
-                    embeddings,
-                    SimilarityMetricType.Ip,
-                    limit: 1,
-                    parameters
-                );
-
-                var toInsert = new Dictionary<Guid, demofrs>();
-                for (int i = 0; i < events.Count; i++)
-                {
-                    // if (ShouldInsertEvent(searchResults, i))
-                    // {
-                        toInsert.TryAdd(events[i].TrackId, events[i]);
-                   // }
-                }
-
-             //   var insert = PostProcessInsertion(toInsert);
-                return toInsert;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
-            return null;
-        }
-    
-        // private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
+    try
+    {
+        // 1. Prepare the list of SearchPoints requests for batch search
+//         var searchPointsList = new List<SearchPoints>();
+//
+//         foreach (var e in events)
+//         {
+//             var searchRequest = new SearchPoints
+//             {
+//                 CollectionName = EventCollectionName, // Set collection name for each request
+//                 Vector = { e.embedding }, // RepeatedField<float> accepts IEnumerable<float>
+//                 Limit = 1,
+//                 WithPayload = false, // We only need the score to decide whether to insert
+//                 // WithVectors = false, // Add if needed, but not required here
+//                 Params = new SearchParams { HnswEf = (ulong)Ef }, // Set HNSW ef parameter
+//                 // Create the Filter object for event_time < e.Time
+//                 Filter = new Filter
+//                 {
+//                     // Add conditions to the 'Must' list for AND logic
+//                     Must = {
+//                         new Condition
+//                         {
+//                             Field = new FieldCondition
+//                             {
+//                                 // IMPORTANT: In Qdrant gRPC filters, payload keys are referenced directly
+//                                 // without the "payload." prefix.
+//                                 Key = "event_time", // Use the payload key directly
+//                                 Range = new Range { Lt = (double)e.Time } // Lt for Less Than (use double)
+//                             }
+//                         }
+//                         // Add more conditions to 'Must' if needed
+//                     }
+//                     // Use 'Should' for OR logic, 'MustNot' for NOT logic if needed
+//                 }
+//                 // Offset = 0, // Default is 0
+//                 // ScoreThreshold = ... // Optional: Set a minimum score threshold if needed
+//             };
+//
+//             searchPointsList.Add(searchRequest);
+//         }
+//
+//     var seq=    Stopwatch.StartNew();
+//         // 2. Execute the batch search using the QdrantClient instance method
+//         var batchResults = await _qdrantClient.SearchBatchAsync(
+//             collectionName: EventCollectionName, // Main collection name (often set per request too)
+//             searches: searchPointsList, // The list of SearchPoints requests
+//             readConsistency: null, // Optional: ReadConsistency
+//             timeout: null, // Optional: Timeout
+//             cancellationToken: default // Optional: Cancellation Token
+//         );
+// seq.Stop();
+// Console.WriteLine(seq.Elapsed + ": search time for batch");
+//         // 3. Process the batch results
+        var toInsert = new Dictionary<Guid, demofrs>();
+       
+        // for (int i = 0; i < batchResults.Count; i++)
         // {
-        //     if (!toInsert.Any())
-        //         return toInsert;
-        //     
-        //     var insert = new Dictionary<Guid, demofrs>();
-        //     var keys = toInsert.Keys.ToList(); 
-        //     int count = keys.Count;
-        //     var isInserted = new bool[count];  
+        //     var batchResult = batchResults[i]; // BatchResult for events[i]
+        //     var currentEvent = events[i];       // The original event
         //
-        //     for (int i = 0; i < count; i++)
+        //     // Check if any results were returned for this specific embedding's search
+        //     // and if the best score meets or exceeds the threshold.
+        //     if (batchResult.Result.Count == 0 || batchResult.Result[0].Score < SimilarityThreshold)
         //     {
-        //         if (isInserted[i])
-        //             continue;
-        //
-        //         var keyI = keys[i];
-        //         var embeddingI = toInsert[keyI].embedding;
-        //
-        //         for (int j = i + 1; j < count; j++) 
-        //         {
-        //             var keyJ = keys[j];
-        //             var embeddingJ = toInsert[keyJ].embedding;
-        //
-        //             var cosineSimilarity = EventProcessor.InnerProduct(embeddingI, embeddingJ);
-        //             if (cosineSimilarity > 0.5)
-        //             {
-        //                 isInserted[j] = true;
-        //             }
-        //         }
-        //
-        //         
-        //         insert.TryAdd(toInsert[keyI].TrackId, toInsert[keyI]);
+        //         // Case 1: No results found, or
+        //         // Case 2: Best result's score is below the threshold.
+        //         // In either case, consider it a new, unique item and mark for insertion.
+        //         toInsert[currentEvent.TrackId] = currentEvent;
+        //         //Console.WriteLine($"[Batch] Marking event {currentEvent.Id} for insertion (Score: {(batchResult.Result.Count > 0 ? batchResult.Result[0].Score : -1.0f)})");
         //     }
-        //
-        //     return insert;
+        //     // else
+        //     // {
+        //     //     // Case 3: A result was found with a score >= threshold.
+        //     //     // It's considered a duplicate, so we don't add it to 'toInsert'.
+        //     //     //Console.WriteLine($"[Batch] Skipping event {currentEvent.Id} (Score: {batchResult.Result[0].Score})");
+        //     // }
         // }
+//to comment from here tp
         
+        
+        foreach (var e in events)
+        {
+            toInsert[e.TrackId] = e;
+        }
+        return toInsert;
+        //here
+        // 4. Apply the final PostProcessInsertion step
+        return PostProcessInsertion(toInsert);
+
+    }
+    catch (Exception ex) // Catch specific gRPC exceptions (Grpc.Core.RpcException) if needed
+    {
+        Console.WriteLine($"Error during Qdrant batch search in GetEventsToBeInserted: {ex.Message}");
+        
+
+        throw; // Re-throw to maintain original error handling flow
+    }
+}
         private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
         {
-            if (!toInsert.Any())
-                return toInsert;
-            
-           
-
-            
+            if (!toInsert.Any()) return toInsert;
 
             var insert = new Dictionary<Guid, demofrs>();
-            var clusters = new List<ReadOnlyMemory<float>>();
+            var clusters = new List<float[]>();
 
             foreach (var kvp in toInsert)
             {
-                var currentEmbedding = kvp.Value.embedding;
+                var current = kvp.Value.embedding;
                 bool matched = false;
 
-                for (int i = 0; i < clusters.Count; i++)
+                foreach (var cluster in clusters)
                 {
-                    var cosineSimilarity = EventProcessor.InnerProduct(currentEmbedding, clusters[i]);
-                    if (cosineSimilarity > 0.5)
+                    var sim = EventProcessor.InnerProduct(current, cluster);
+                    if (sim > 0.5)
                     {
                         matched = true;
                         break;
@@ -376,76 +292,35 @@ namespace MyApp
 
                 if (!matched)
                 {
-                    clusters.Add(currentEmbedding);
-                    insert.TryAdd(kvp.Value.TrackId, kvp.Value);
-
+                    clusters.Add(current);
+                    insert[kvp.Key] = kvp.Value;
                 }
             }
-            
 
             return insert;
         }
 
-
-
-        private static bool ShouldInsertEvent(SearchResults searchResults, int index)
+        public static async Task<bool> AddEventsToQueueAsync(Dictionary<Guid, demofrs> eventsToBeInserted)
         {
-            const float similarityThreshold = 0.5f;
-    
-            if (searchResults is null || searchResults.Scores.Count < 1)
-            {
-                return true;
-            }
+            if (eventsToBeInserted.Count == 0) return true;
 
-            return searchResults.Scores[index] < similarityThreshold;
-        }
-        
-
-        public static async Task<bool> AddEventsToQueueAsync(Dictionary<Guid, demofrs> eventsToBeinserted)
-        {
-            try
+            var points = eventsToBeInserted.Values.Select(e => new PointStruct
             {
-                if (eventsToBeinserted.Count == 0)
+                Id = new PointId { Uuid = e.TrackId.ToString() }, // Use TrackId as ID
+                Vectors = e.embedding,
+                Payload =
                 {
-                    return true;
+                    ["track_id"] = e.TrackId.ToString(),
+                    ["event_id"] = e.Id.ToString(),
+                    ["device_id"] = e.VideoSourceId.ToString(),
+                    ["time"] = e.Time
                 }
+            }).ToList();
 
-                // var trackIdSet = new HashSet<string>();
-                // foreach (var se in paramsgh.TrackId)
-                // {
-                //     if (trackIdSet.Contains(se))
-                //     {
-                //         Console.WriteLine("error detected");
-                //     }
-                //
-                //     trackIdSet.Add(se);
-                // }
-                var events = eventsToBeinserted.Values.ToList();
-                List<ReadOnlyMemory<float>> embeddings = events
-                    .Select(e => new ReadOnlyMemory<float>(e.embedding))
-                    .ToList();
-                var x = await _milvusCollection.UpsertAsync(new FieldData[]
-                {
-                    FieldData.Create($"{EventProcessor.EventCollectionProperties.TrackId}",
-                        events.Select(x => x.TrackId.ToString()).ToList()),
-                    FieldData.Create($"{EventProcessor.EventCollectionProperties.EventId}",
-                        events.Select(x => x.Id.ToString()).ToList()),
-           
-
-                    FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
-                    FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",
-                        events.Select(x => x.VideoSourceId.ToString()).ToList()),
-                });
-            
-             
-            
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex.Message);
-                return false;
-            }
+            await _qdrantClient.UpsertAsync(EventCollectionName, points);
+            eventInsertedCount += points.Count;
+            Console.WriteLine($"📤 Upserted {points.Count} vectors");
+            return true;
         }
     }
 }
