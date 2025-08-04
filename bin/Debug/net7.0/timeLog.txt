@@ -1,1 +1,1 @@
-⏹️ Stopped qdrant insertion. Total time: 00:00:07.0839321
+⏹️ Stopped qdrant insertion. Total time: 00:06:08.5812136

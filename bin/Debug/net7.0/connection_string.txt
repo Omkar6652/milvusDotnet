@@ -1,1 +1,1 @@
-User ID=postgres;Password=analytic_server;Host=192.168.1.33;Port=5432;Database=QdranTest;Pooling=true;Include Error Detail=true;
+User ID=postgres;Password=postgres;Host=192.168.5.30;Port=5438;Database=timescaledb;Pooling=true;Include Error Detail=true;

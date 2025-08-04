@@ -162,6 +162,7 @@ public static class EventProcessor
                     }
                     // Use 'Should' for OR logic, 'MustNot' for NOT logic if needed
                 }
+                
                 // Offset, ScoreThreshold, etc. can be set here if required
             };
 

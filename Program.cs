@@ -76,6 +76,30 @@ namespace MyApp
                     Console.WriteLine("🟡 Waiting for collection to be ready...");
                     await Task.Delay(1000);
                 }
+              
+
+
+                try
+                {
+                   
+                    var result = await _qdrantClient.CreatePayloadIndexAsync(
+                        collectionName: EventCollectionName,
+                        fieldName: "time", // This must match the key used in the Payload dictionary during Upsert
+                        schemaType: PayloadSchemaType.Integer // Matches long/integer values
+                        // indexParams: null, // Optional: Specific index parameters (e.g., for text)
+                        // wait: true, // Optional: Usually defaults to true, waits for index creation
+                        // ordering: null, // Optional: Write ordering
+                        // cancellationToken: default // Optional: Cancellation
+                    );
+                    // The 'result' (UpdateResult) contains status info, but often you just check for exceptions.
+                    Console.WriteLine("✅ Payload index created on 'time' field.");
+                }
+                catch (Exception ex)
+                {
+                    // Handle potential exceptions (e.g., index might already exist)
+                    Console.WriteLine($"⚠️  Note during payload index creation: {ex.Message}");
+                    // You might choose to log and continue, or re-throw based on your needs.
+                }
 
                 Console.WriteLine("🚀 Hello World! Started qdrant insertion");
                 var stopwatch = Stopwatch.StartNew();
