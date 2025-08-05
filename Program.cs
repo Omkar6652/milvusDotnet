@@ -175,17 +175,17 @@ namespace MyApp
                File.AppendAllTextAsync(timelogTxt, logstring);
                 File.WriteAllText(eventIdFileName, Id);
                 
-              await ProcessIndexWork();
+             // await ProcessIndexWork();
                
-         //       Stopwatch stopswatch = Stopwatch.StartNew();
-         //   
-         //     await EventProcessor.StartGroupIdWork(DbConnectionString);
-         //     stopswatch.Stop();
-         //                
-         // var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
-         // Console.WriteLine(groupidLogString);
-         //
-         //  File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
+               Stopwatch stopswatch = Stopwatch.StartNew();
+           
+             await EventProcessor.StartGroupIdWork(DbConnectionString);
+             stopswatch.Stop();
+                        
+         var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
+         Console.WriteLine(groupidLogString);
+         
+          File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
 
             }
             catch (Exception ex)
@@ -231,7 +231,7 @@ namespace MyApp
                     var getFaceEventsFromDbQuery = "";
 
                     getFaceEventsFromDbQuery =
-                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"Time\", e.\"VideoSourceId\"  from events.\"eventsbak\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
+                        $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"Time\", e.\"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
 
 
                     var events = npgsqlConnection
@@ -271,25 +271,25 @@ namespace MyApp
                 if (!events.Any())
                     return new Dictionary<Guid, demofrs>();
 
-                var embeddings = events
-                    .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
-                    .ToList();
-
-                var parameters = new SearchParameters
-                {
-                    OutputFields = { "track_id", "event_id",  },
-                    ConsistencyLevel = ConsistencyLevel.Strong,
-                    Offset = 0,
-                    ExtraParameters = { ["nprobe"] = "128" },
-                };
-
-                var searchResults = await Program._milvusCollection.SearchAsync(
-                    EventProcessor.EventCollectionProperties.Embedding,
-                    embeddings,
-                    SimilarityMetricType.Ip,
-                    limit: 1,
-                    parameters
-                );
+                // var embeddings = events
+                //     .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
+                //     .ToList();
+                //
+                // var parameters = new SearchParameters
+                // {
+                //     OutputFields = { "track_id", "event_id",  },
+                //     ConsistencyLevel = ConsistencyLevel.Strong,
+                //     Offset = 0,
+                //     ExtraParameters = { ["nprobe"] = "128" },
+                // };
+                //
+                // var searchResults = await Program._milvusCollection.SearchAsync(
+                //     EventProcessor.EventCollectionProperties.Embedding,
+                //     embeddings,
+                //     SimilarityMetricType.Ip,
+                //     limit: 1,
+                //     parameters
+                // );
 
                 var toInsert = new Dictionary<Guid, demofrs>();
                 for (int i = 0; i < events.Count; i++)
