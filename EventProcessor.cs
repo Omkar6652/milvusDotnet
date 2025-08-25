@@ -35,6 +35,7 @@ public static class EventProcessor
         public const string EventId = "event_id";
         public const string Embedding = "embedding";
         public static string VideoSourceId = "device_id";
+        public const string EventTime = "event_time";
     }
 
     public static async Task StartGroupIdWork(string connectionString)
@@ -205,7 +206,7 @@ public static class EventProcessor
                 ExtraParameters = { ["nprobe"] = "128" },
             };
            
-            var searchResult = await Program._milvusCollection.SearchAsync(EventCollectionProperties.Embedding,
+            var searchResult = await Program._uniquePeopleMilvusCollection.SearchAsync(EventCollectionProperties.Embedding,
                 embeddings,
                 SimilarityMetricType.Ip, limit: 1, parameters);
 

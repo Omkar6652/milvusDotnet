@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Text;
-using CommandLine;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using Dapper;
 using Milvus.Client;
+using MyApp.Models;
 using Newtonsoft.Json;
 using Npgsql;
 using Serilog;
@@ -17,10 +20,8 @@ namespace MyApp
         public Guid TrackId { get; set; }
         public long Time { get; set; }
         public float[] embedding { get; set; }
-
         public Guid VideoSourceId { get; set; }
     }
-
 
     internal class Program
     {
@@ -36,12 +37,20 @@ namespace MyApp
             "User ID=postgres;Password=postgres;Host=localhost;Port=5438;Database=timescaledb;Pooling=true;Include Error Detail=true;";
 
         public static string EventCollectionName = "demoCollection";
-        private static MilvusClient _milvusClient;
-        public static MilvusCollection _milvusCollection;
+        
+        // Separate Milvus clients for each collection
+        public static MilvusClient _watchlistMilvusClient;
+        public static MilvusClient _eventMilvusClient;
+        public static MilvusClient _uniquePeopleMilvusClient;
+        
+        // Separate Milvus collections
+        public static MilvusCollection _watchlistMilvusCollection;
+        public static MilvusCollection _eventMilvusCollection;
+        public static MilvusCollection _uniquePeopleMilvusCollection;
+        
         public static string deletionId;
         public static Dictionary<string, List<demofrs>> clusterInfo =
             new Dictionary<string, List<demofrs>>();
-
 
         static async Task Main(string[] args)
         {
@@ -50,7 +59,6 @@ namespace MyApp
             // Check if the file exists
             if (!File.Exists(eventIdFileName))
             {
-                // Create the file and write text into it
                 File.WriteAllText(eventIdFileName, Id);
                 Console.WriteLine("File created and text written.");
             }
@@ -62,131 +70,70 @@ namespace MyApp
 
             string connectionStringFileName = "connection_string.txt";
 
-            // Check if the file exists
             if (!File.Exists(connectionStringFileName))
             {
-                // Create the file and write text into it
                 File.WriteAllText(connectionStringFileName, DbConnectionString);
                 Console.WriteLine("File created and text written.");
             }
             else
             {
                 DbConnectionString = File.ReadAllText(connectionStringFileName);
-                Console.WriteLine($"File already exists. ID read from file: {DbConnectionString}");
+                Console.WriteLine($"File already exists. Connection string read from file: {DbConnectionString}");
             }
 
             string milvusIpFileName = "milvus_ip.txt";
 
-            // Check if the file exists
             if (!File.Exists(milvusIpFileName))
             {
-                // Create the file and write text into it
                 File.WriteAllText(milvusIpFileName, MilvusIp);
                 Console.WriteLine("File created and text written.");
             }
             else
             {
                 MilvusIp = File.ReadAllText(milvusIpFileName);
-                Console.WriteLine($"File already exists. ID read from file: {MilvusIp}");
+                Console.WriteLine($"File already exists. Milvus IP read from file: {MilvusIp}");
             }
-             timelogTxt = "timeLog.txt";
-             groupIdTimeLogText = "groupIdTimeLog.txt";
+            
+            timelogTxt = "timeLog.txt";
+            groupIdTimeLogText = "groupIdTimeLog.txt";
 
-            // Check if the file exists
             if (!File.Exists(timelogTxt))
             {
-                // Create the file and write text into it
                 File.AppendAllTextAsync(timelogTxt, Id);
                 Console.WriteLine("File created and text written.");
             }
             if (!File.Exists(groupIdTimeLogText))
             {
-                // Create the file and write text into it
                 File.AppendAllTextAsync(groupIdTimeLogText, Id);
                 Console.WriteLine("File created and text written.");
             }
-           
 
             var startTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             try
             {
-                _milvusClient = new MilvusClient(MilvusIp, port: 19530);
-                //await _milvusClient.CreateDatabaseAsync("frs");
-                // var databases = await _milvusClient.ListDatabasesAsync();
-                //
-                // foreach (var database in databases)
-                // {
-                //     Console.WriteLine(database);
-                // }
-
-                var schema = new CollectionSchema
-                {
-                    Fields =
-                    {
-                        FieldSchema.CreateVarchar("track_id", maxLength: 50, isPrimaryKey: true),
-                        FieldSchema.CreateVarchar("event_id", maxLength: 50),
-                        FieldSchema.CreateFloatVector("embedding", dimension: 512),
-                        FieldSchema.CreateVarchar("device_id", maxLength: 50)
-                    }
-                };
-
-                if (!await _milvusClient.HasCollectionAsync(EventCollectionName))
-                {
-                    _milvusCollection = await _milvusClient.CreateCollectionAsync(EventCollectionName, schema,
-                        consistencyLevel: ConsistencyLevel.Strong);
-                }
-                else
-                {
-                    _milvusCollection = _milvusClient.GetCollection(EventCollectionName);
-                }
-
-               // var extraParams = new Dictionary<string, string> { { "M", "130" }, { "efConstruction", "660" } };
-                // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Hnsw,
-                //     metricType: SimilarityMetricType.Ip,
-                //     extraParams: extraParams);
-                var extraParams = new Dictionary<string, string> {  { "nlist", "1024" }  };
-                // await _milvusCollection.CreateIndexAsync("embedding", indexType: IndexType.Flat,
-                //     metricType: SimilarityMetricType.Ip,
-                //     extraParams: extraParams);
-                 await _milvusCollection.LoadAsync();
-                // Console.Write("Enter deletionId (GUID): ");
-                // string deletionId = Console.ReadLine()?.Trim();
-                //
-                // if (Guid.TryParse(deletionId, out Guid parsedGuid))
-                // {
-                //     string filter = $"event_id <  \"{parsedGuid}\"";
-                //     await _milvusCollection.DeleteAsync(filter);
-                //     Console.WriteLine("Delete operation submitted.");
-                // }
-                // else
-                // {
-                //     Console.WriteLine("Invalid GUID format. Please enter a valid GUID.");
-                // }
-               //
-               Console.WriteLine("Hello World! started milvusinsertion");
-               Stopwatch stopwatch = Stopwatch.StartNew();
+                PrepareMilvus();
+    
+                Console.WriteLine("Hello World! started milvusinsertion");
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                await ProcessWatchListCollectionInsertion();
+                await ProcessEventsAndUniquePeopleInsertion();
                
-               await ProcessEventsNotHavingGroupIds();
-               
-               stopwatch.Stop();
+                stopwatch.Stop();
                
                 var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
                 Console.WriteLine(logstring);
-               File.AppendAllTextAsync(timelogTxt, logstring);
+                File.AppendAllTextAsync(timelogTxt, logstring);
                 File.WriteAllText(eventIdFileName, Id);
-                
-             // await ProcessIndexWork();
-               
-               Stopwatch stopswatch = Stopwatch.StartNew();
+                // await ProcessIndexWork(); 
+                Stopwatch stopswatch = Stopwatch.StartNew();
            
-             await EventProcessor.StartGroupIdWork(DbConnectionString);
-             stopswatch.Stop();
+                await EventProcessor.StartGroupIdWork(DbConnectionString);
+                stopswatch.Stop();
                         
-         var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
-         Console.WriteLine(groupidLogString);
+                var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
+                Console.WriteLine(groupidLogString);
          
-          File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
-
+                File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
             }
             catch (Exception ex)
             {
@@ -197,13 +144,287 @@ namespace MyApp
             Console.WriteLine($"TIME TAKEN {endTime - startTime}");
         }
 
+      private static async Task ProcessWatchListCollectionInsertion()
+{
+    NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+    npgsqlConnection.Open();
+    
+    try
+    {
+        var processedCount = 0;
+        var limit = 1000;
+        var offset = 0;
+
+        while (true)
+        {
+            Console.WriteLine("Processing WatchList Collection Insertion...");
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
+            var query = $@"
+                SELECT ""Id"" as FaceId, ""PersonId"", ""Embedding""::real[] as Embeddings 
+                FROM public.""FacePoint"" 
+                ORDER BY ""Id"" 
+                OFFSET {offset} 
+                LIMIT {limit}";
+
+            var watchListItems = npgsqlConnection
+                .Query<WatchListCollectionModel>(query)
+                .ToList();
+
+            if (watchListItems.Count == 0)
+            {
+                break;
+            }
+
+            await InsertWatchListItems(watchListItems);
+            
+            offset += limit;
+            processedCount += watchListItems.Count;
+            
+            stopwatch.Stop();
+            var logstring = $"WatchList Insertion Done: {processedCount} Total time taken: {stopwatch.Elapsed}";
+            Console.WriteLine(logstring);
+            File.AppendAllTextAsync(timelogTxt, logstring);
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
+        Log.Error($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
+    }
+    finally
+    {
+        npgsqlConnection.Close();
+    }
+}
+
+private static async Task<bool> InsertWatchListItems(List<WatchListCollectionModel> items)
+{
+    try
+    {
+        if (items.Count == 0)
+        {
+            return true;
+        }
+
+        List<ReadOnlyMemory<float>> embeddings = items
+            .Select(e => new ReadOnlyMemory<float>(e.Embeddings.ToArray()))
+            .ToList();
+
+        var result = await _watchlistMilvusCollection.UpsertAsync(new FieldData[]
+        {
+            FieldData.Create(WatchListCollectionProperties.FaceId,
+                items.Select(x => x.FaceId.ToString()).ToList()),
+            FieldData.Create(WatchListCollectionProperties.PersonId,
+                items.Select(x => x.PersonId.ToString()).ToList()),
+            FieldData.CreateFloatVector(WatchListCollectionProperties.Embedding, embeddings)
+        });
+
+        Console.WriteLine($"Inserted {items.Count} items into WatchList collection");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error inserting WatchList items: {ex.Message}");
+        Log.Error($"Error inserting WatchList items: {ex.Message}");
+        return false;
+    }
+}
+
+        public class MilvusDbInfoParameters
+        {
+            public string CollectionName { get; set; }
+            public CollectionSchema CollectionSchema { get; set; }
+            public MilvusDbIndexParameters MilvusDbIndexParameters { get; set; }
+        }
+
+        public class MilvusDbIndexParameters
+        {
+            public string FieldName { get; set; }
+            public IndexType IndexType { get; set; }
+            public SimilarityMetricType SimilarityMetricType { get; set; }
+            public Dictionary<string, string> ExtraParams { get; set; }
+        }
+
+        public static async Task<bool> IsVectorConnectedAsync(MilvusClient client)
+        {
+            if (client == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var res = await client.HealthAsync();
+                return res.IsHealthy;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error getting health: {ex.Message}");
+                return false;
+            }
+        }
+
+        public static async Task PrepareMilvusDb(MilvusClient client, MilvusDbInfoParameters milvusDbInfoParameters)
+        {
+            try
+            {
+                const int retryDelayMs = 2000;
+                int attempt = 0;
+
+                while (true)
+                {
+                    attempt++;
+                    if (await IsVectorConnectedAsync(client))
+                    {
+                        Log.Error($"Successfully connected to Milvus DB on attempt {attempt}");
+                        break;
+                    }
+    
+                    Log.Error($"Milvus DB connection attempt {attempt} failed. Retrying in {retryDelayMs}ms...");
+                    await Task.Delay(retryDelayMs);
+                }
+
+                if (!await client.HasCollectionAsync(milvusDbInfoParameters.CollectionName))
+                {
+                    var collection = await client.CreateCollectionAsync(milvusDbInfoParameters.CollectionName,
+                        milvusDbInfoParameters.CollectionSchema, consistencyLevel: ConsistencyLevel.Strong);
+                    
+                    await collection.CreateIndexAsync(milvusDbInfoParameters.MilvusDbIndexParameters.FieldName,
+                        indexType: milvusDbInfoParameters.MilvusDbIndexParameters.IndexType,
+                        metricType: milvusDbInfoParameters.MilvusDbIndexParameters.SimilarityMetricType,
+                        extraParams: milvusDbInfoParameters.MilvusDbIndexParameters.ExtraParams);
+
+                    Log.Information($"Created new Milvus collection: {milvusDbInfoParameters.CollectionName}");
+                }
+                else
+                {
+                    Log.Information($"Connected to existing Milvus collection: {milvusDbInfoParameters.CollectionName}");
+                }
+
+                var milvusCollection = client.GetCollection(milvusDbInfoParameters.CollectionName);
+                await milvusCollection.LoadAsync();
+                
+                // Assign to appropriate collection based on name
+                switch (milvusDbInfoParameters.CollectionName)
+                {
+                    case enrollmentCollectionName:
+                        _watchlistMilvusCollection = milvusCollection;
+                        break;
+                    case eventCollectionName:
+                        _eventMilvusCollection = milvusCollection;
+                        break;
+                    case uniquePeopleCollection:
+                        _uniquePeopleMilvusCollection = milvusCollection;
+                        break;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error($"Error in [PrepareMilvusDb] of [MilvusWrapper]: {e.Message}");
+                return;
+            }
+        }
+
+        public const string enrollmentCollectionName = "watchlist";
+        public const string eventCollectionName = "eventcollection";
+        public const string uniquePeopleCollection = "uniquePeopleCollection";
+
+        private class WatchListCollectionProperties
+        {
+            public const string FaceId = "faceId";
+            public const string PersonId = "personId";
+            public const string Embedding = "embedding";
+        }
+
+        private static void PrepareMilvus()
+        {
+            // Initialize separate Milvus clients
+            _watchlistMilvusClient = new MilvusClient(MilvusIp, 19530);
+            _eventMilvusClient = new MilvusClient(MilvusIp, 19530);
+            _uniquePeopleMilvusClient = new MilvusClient(MilvusIp, 19530);
+
+            var uniquePeopleCollectionSchema = new CollectionSchema
+            {
+                Fields =
+                {
+                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
+                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
+                    FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
+                }
+            };
+
+            var eventCollectionSchema = new CollectionSchema
+            {
+                Fields =
+                {
+                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
+                    FieldSchema.Create<long>(EventProcessor.EventCollectionProperties.EventTime),
+                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
+                    FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
+                }
+            };
+
+            var schema = new CollectionSchema
+            {
+                Fields =
+                {
+                    FieldSchema.CreateVarchar(WatchListCollectionProperties.FaceId, maxLength: 50, isPrimaryKey: true),
+                    FieldSchema.CreateVarchar(WatchListCollectionProperties.PersonId, maxLength: 50),
+                    FieldSchema.CreateFloatVector(WatchListCollectionProperties.Embedding, dimension: 512)
+                }
+            };
+
+            var watchListMilvusParams = new MilvusDbInfoParameters()
+            {
+                CollectionName = enrollmentCollectionName,
+                CollectionSchema = schema,
+                MilvusDbIndexParameters = new MilvusDbIndexParameters()
+                {
+                    FieldName = WatchListCollectionProperties.Embedding,
+                    IndexType = IndexType.Hnsw,
+                    SimilarityMetricType = SimilarityMetricType.Ip,
+                    ExtraParams = new Dictionary<string, string>() { { "M", "30" }, { "efConstruction", "360" } }
+                }
+            };
+
+            var milvusParams = new MilvusDbInfoParameters()
+            {
+                CollectionName = eventCollectionName,
+                CollectionSchema = eventCollectionSchema,
+                MilvusDbIndexParameters = new MilvusDbIndexParameters()
+                {
+                    FieldName = EventProcessor.EventCollectionProperties.Embedding,
+                    IndexType = IndexType.Flat,
+                    SimilarityMetricType = SimilarityMetricType.Ip,
+                    ExtraParams = new Dictionary<string, string>() { }
+                }
+            };
+
+            var milvusUniquePeopleParams = new MilvusDbInfoParameters()
+            {
+                CollectionName = uniquePeopleCollection,
+                CollectionSchema = uniquePeopleCollectionSchema,
+                MilvusDbIndexParameters = new MilvusDbIndexParameters()
+                {
+                    FieldName = EventProcessor.EventCollectionProperties.Embedding,
+                    IndexType = IndexType.Hnsw,
+                    SimilarityMetricType = SimilarityMetricType.Ip,
+                    ExtraParams = new Dictionary<string, string>() { { "M", "30" }, { "efConstruction", "360" } }
+                }
+            };
+
+            PrepareMilvusDb(_watchlistMilvusClient, watchListMilvusParams).GetAwaiter().GetResult();
+            PrepareMilvusDb(_uniquePeopleMilvusClient, milvusUniquePeopleParams).GetAwaiter().GetResult();
+            PrepareMilvusDb(_eventMilvusClient, milvusParams).GetAwaiter().GetResult();
+        }
+
         public static async Task ProcessIndexWork()
         {
-            var response = await _milvusCollection.DescribeIndexAsync("embedding", "embedding");
-            // Check the indexing status
+            var response = await _eventMilvusCollection.DescribeIndexAsync("embedding", "embedding");
             while (response[0].PendingIndexRows != 0)
             {
-                response = await _milvusCollection.DescribeIndexAsync("embedding", "embedding");
+                response = await _eventMilvusCollection.DescribeIndexAsync("embedding", "embedding");
                 Console.WriteLine("rows left is " + response[0].PendingIndexRows);
                 Console.WriteLine("index done is " + response[0].IndexedRows);
                 Console.WriteLine("state is " + response[0].State);
@@ -211,11 +432,9 @@ namespace MyApp
             }
         }
 
-        public static async Task ProcessEventsNotHavingGroupIds()
+        public static async Task ProcessEventsAndUniquePeopleInsertion()
         {
-            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(
-                DbConnectionString
-            );
+            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
             npgsqlConnection.Open();
             try
             {
@@ -228,24 +447,36 @@ namespace MyApp
                     Console.WriteLine("pereventInsertion Log");
                     Stopwatch stopwatch = Stopwatch.StartNew();
 
-                    var getFaceEventsFromDbQuery = "";
-
-                    getFaceEventsFromDbQuery =
+                    var getFaceEventsFromDbQuery =
                         $"select e.\"Id\",e.\"embedding\"::real[],e.\"TrackId\", e.\"Time\", e.\"VideoSourceId\"  from events.\"Face_Recognition\" as e where e.\"Id\">'{Id}'    ORDER BY e.\"Id\" FETCH NEXT ({limit}) ROWS ONLY;";
-
 
                     var events = npgsqlConnection
                         .Query<demofrs>(getFaceEventsFromDbQuery)
                         .ToList();
+                    
                     if (events.Count == 0)
                     {
                         break;
                     }
+                    foreach (var evt in events)
+                    {
+                        if (evt.Time <= 0)
+                        {
+                            Console.WriteLine($"Warning: Event {evt.Id} has invalid time: {evt.Time}");
+                        }
+                        if (evt.embedding == null || evt.embedding.Length == 0)
+                        {
+                            Console.WriteLine($"Warning: Event {evt.Id} has null or empty embedding");
+                        }
+                    }
 
                     Dictionary<Guid, demofrs> eventsToBeinserted = new();
+                    Dictionary<Guid, demofrs> uniqueEventsToBeInserted = new();
                     eventsToBeinserted = await GetEventsToBeInserted(events);
+                    uniqueEventsToBeInserted = await GetUniqueEventsToBeInserted(events);
 
                     await AddEventsToQueueAsync(eventsToBeinserted);
+                    await AddEventsToUniquePeopleQueueAsyc(uniqueEventsToBeInserted);
                     offset = offset + limit;
                     processedEvent += events.Count;
                     Id = events.Last().Id.ToString();
@@ -263,44 +494,112 @@ namespace MyApp
             npgsqlConnection.Close();
         }
 
-        public static async Task<Dictionary<Guid, demofrs>> GetEventsToBeInserted(List<demofrs> events)
+        private static async Task AddEventsToUniquePeopleQueueAsyc(Dictionary<Guid, demofrs> uniqueEventsToBeInserted)
         {
             try
             {
-               
+                if (uniqueEventsToBeInserted.Count == 0)
+                {
+                    return ;
+                }
+
+                // var trackIdSet = new HashSet<string>();
+                // foreach (var se in paramsgh.TrackId)
+                // {
+                //     if (trackIdSet.Contains(se))
+                //     {
+                //         Console.WriteLine("error detected");
+                //     }
+                //
+                //     trackIdSet.Add(se);
+                // }
+                var events = uniqueEventsToBeInserted.Values.ToList();
+                List<ReadOnlyMemory<float>> embeddings = events
+                    .Select(e => new ReadOnlyMemory<float>(e.embedding))
+                    .ToList();
+                
+                var x = await _uniquePeopleMilvusCollection.UpsertAsync(new FieldData[]
+                {
+                    FieldData.Create($"{EventProcessor.EventCollectionProperties.TrackId}",
+                        events.Select(x => x.TrackId.ToString()).ToList()),
+                    FieldData.Create($"{EventProcessor.EventCollectionProperties.EventId}",
+                        events.Select(x => x.Id.ToString()).ToList()),
+                    FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
+                   
+                });
+            
+                return ;
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex.Message);
+                return ;
+            }
+            
+        }
+
+        private static async Task<Dictionary<Guid, demofrs>> GetUniqueEventsToBeInserted(List<demofrs> events)
+        {
+            try
+            {
                 if (!events.Any())
                     return new Dictionary<Guid, demofrs>();
 
-                // var embeddings = events
-                //     .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
-                //     .ToList();
-                //
-                // var parameters = new SearchParameters
-                // {
-                //     OutputFields = { "track_id", "event_id",  },
-                //     ConsistencyLevel = ConsistencyLevel.Strong,
-                //     Offset = 0,
-                //     ExtraParameters = { ["nprobe"] = "128" },
-                // };
-                //
-                // var searchResults = await Program._milvusCollection.SearchAsync(
-                //     EventProcessor.EventCollectionProperties.Embedding,
-                //     embeddings,
-                //     SimilarityMetricType.Ip,
-                //     limit: 1,
-                //     parameters
-                // );
+                var embeddings = events
+                    .Select(e => new ReadOnlyMemory<float>(e.embedding.ToArray()))
+                    .ToList();
+
+                var parameters = new SearchParameters
+                {
+                    OutputFields = { "track_id", "event_id", },
+                    ConsistencyLevel = ConsistencyLevel.Strong,
+                    Offset = 0,
+                    ExtraParameters = { ["nprobe"] = "128" },
+                };
+
+                var searchResults = await _uniquePeopleMilvusCollection.SearchAsync(
+                    EventProcessor.EventCollectionProperties.Embedding,
+                    embeddings,
+                    SimilarityMetricType.Ip,
+                    limit: 1,
+                    parameters
+                );
 
                 var toInsert = new Dictionary<Guid, demofrs>();
                 for (int i = 0; i < events.Count; i++)
                 {
-                    // if (ShouldInsertEvent(searchResults, i))
-                    // {
+                    if (ShouldInsertEvent(searchResults, i))
+                    {
                         toInsert.TryAdd(events[i].TrackId, events[i]);
-                   // }
+                    }
                 }
 
-             //   var insert = PostProcessInsertion(toInsert);
+                var insert = PostProcessInsertion(toInsert);
+                return insert;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            return null;
+        }
+
+        public static async Task<Dictionary<Guid, demofrs>> GetEventsToBeInserted(List<demofrs> events)
+        {
+            try
+            {
+                if (!events.Any())
+                    return new Dictionary<Guid, demofrs>();
+
+            
+
+                var toInsert = new Dictionary<Guid, demofrs>();
+                for (int i = 0; i < events.Count; i++)
+                {
+              
+                        toInsert.TryAdd(events[i].TrackId, events[i]);
+                }
+
                 return toInsert;
             }
             catch (Exception ex)
@@ -378,15 +677,11 @@ namespace MyApp
                 {
                     clusters.Add(currentEmbedding);
                     insert.TryAdd(kvp.Value.TrackId, kvp.Value);
-
                 }
             }
-            
 
             return insert;
         }
-
-
 
         private static bool ShouldInsertEvent(SearchResults searchResults, int index)
         {
@@ -399,7 +694,6 @@ namespace MyApp
 
             return searchResults.Scores[index] < similarityThreshold;
         }
-        
 
         public static async Task<bool> AddEventsToQueueAsync(Dictionary<Guid, demofrs> eventsToBeinserted)
         {
@@ -424,26 +718,23 @@ namespace MyApp
                 List<ReadOnlyMemory<float>> embeddings = events
                     .Select(e => new ReadOnlyMemory<float>(e.embedding))
                     .ToList();
-                var x = await _milvusCollection.UpsertAsync(new FieldData[]
+                
+                var x = await _eventMilvusCollection.UpsertAsync(new FieldData[]
                 {
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.TrackId}",
                         events.Select(x => x.TrackId.ToString()).ToList()),
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.EventId}",
                         events.Select(x => x.Id.ToString()).ToList()),
-           
-
                     FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
-                    FieldData.Create($"{EventProcessor.EventCollectionProperties.VideoSourceId}",
-                        events.Select(x => x.VideoSourceId.ToString()).ToList()),
+                    FieldData.Create($"{EventProcessor.EventCollectionProperties.EventTime}",
+                        events.Select(x => x.Time).ToList()),
                 });
-            
-             
             
                 return true;
             }
             catch (Exception ex)
             {
-                Log.Error(ex.Message);
+                Console.WriteLine(ex.Message);
                 return false;
             }
         }
