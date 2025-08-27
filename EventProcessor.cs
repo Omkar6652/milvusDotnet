@@ -38,7 +38,7 @@ public static class EventProcessor
         public const string EventTime = "event_time";
     }
 
-    public static async Task StartGroupIdWork(string connectionString)
+    public static async Task StartGroupIdAssignWork(string connectionString)
     {
         NpgsqlConnection npgsqlConnection = new NpgsqlConnection(
             connectionString
@@ -196,8 +196,8 @@ public static class EventProcessor
             {
                 OutputFields =
                 {
-                    "track_id",
-                    "event_id",
+                  EventCollectionProperties.TrackId,
+                    EventCollectionProperties.EventId,
                     
                 },
                 ConsistencyLevel = ConsistencyLevel.Strong,

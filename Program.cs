@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Dapper;
 using Milvus.Client;
+using MyApp;
 using MyApp.Models;
 using Newtonsoft.Json;
 using Npgsql;
@@ -54,6 +55,7 @@ namespace MyApp
 
         static async Task Main(string[] args)
         {
+           
             string eventIdFileName = "last_event_id.txt";
 
             // Check if the file exists
@@ -111,7 +113,42 @@ namespace MyApp
             var startTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             try
             {
+                Task.Factory.StartNew(
+                    () =>
+                    {
+                        while (true)
+                        {
+                            var now = DateTime.Now;
+
+                            if (now.Hour == 2)
+                            {
+                                try
+                                {
+                                    string time = GetRemoveLogsAfter();
+                                    if (string.IsNullOrEmpty(time))
+                                    {
+                                        time = "30";
+                                    }
+
+                                    var checkTime = DateTimeOffset
+                                        .UtcNow.AddDays(-Int32.Parse(time))
+                                        .ToUnixTimeMilliseconds();
+
+                                    cleanLogs(checkTime);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Error($"Error during LogsCleaner execution: {ex.Message}");
+                                }
+                            }
+
+                            Task.Delay(TimeSpan.FromMinutes(15)).Wait();
+                        }
+                    },
+                    TaskCreationOptions.LongRunning
+                );
                 PrepareMilvus();
+                await RemoveTriggersAndIndexing();
     
                 Console.WriteLine("Hello World! started milvusinsertion");
                 Stopwatch stopwatch = Stopwatch.StartNew();
@@ -127,7 +164,7 @@ namespace MyApp
                 // await ProcessIndexWork(); 
                 Stopwatch stopswatch = Stopwatch.StartNew();
            
-                await EventProcessor.StartGroupIdWork(DbConnectionString);
+                await EventProcessor.StartGroupIdAssignWork(DbConnectionString);
                 stopswatch.Stop();
                         
                 var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
@@ -144,7 +181,55 @@ namespace MyApp
             Console.WriteLine($"TIME TAKEN {endTime - startTime}");
         }
 
-      private static async Task ProcessWatchListCollectionInsertion()
+        private static async Task RemoveTriggersAndIndexing()
+        {
+            using var npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+            try
+            {
+                await npgsqlConnection.OpenAsync();
+
+                // Drop existing objects if they exist
+                string dropQuery = @"
+            -- Drop the trigger if it exists
+            DROP TRIGGER IF EXISTS before_insert_face_recognition ON events.""Face_Recognition"";
+
+            -- Drop the function if it exists
+            DROP FUNCTION IF EXISTS events.assign_group_id_to_frs_events();
+
+            -- Drop the index if it exists
+            DROP INDEX IF EXISTS ""FacePoint_embedding_idx"";";
+
+                await npgsqlConnection.ExecuteAsync(dropQuery);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception or handle it as needed
+                Console.WriteLine($"Error removing triggers and indexing: {ex.Message}");
+                throw; // Re-throw if you want calling code to handle it
+            }
+            finally
+            {
+                if (npgsqlConnection.State == System.Data.ConnectionState.Open)
+                {
+                    npgsqlConnection.Close();
+                }
+            }
+        }
+
+        private static string GetRemoveLogsAfter()
+        {
+            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+            npgsqlConnection.Open();
+           var query = "SELECT \"Value\" FROM public.\"SystemConfig\" where  \"Key\" = 'RemoveEventLogsAfter'" ;
+
+
+            var watchListItems = npgsqlConnection
+                .Query<string>(query)
+                .ToList();
+            return watchListItems[0];
+        }
+
+        private static async Task ProcessWatchListCollectionInsertion()
 {
     NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
     npgsqlConnection.Open();
@@ -421,10 +506,10 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
 
         public static async Task ProcessIndexWork()
         {
-            var response = await _eventMilvusCollection.DescribeIndexAsync("embedding", "embedding");
+            var response = await _eventMilvusCollection.DescribeIndexAsync("embedding",EventProcessor.EventCollectionProperties.Embedding);
             while (response[0].PendingIndexRows != 0)
             {
-                response = await _eventMilvusCollection.DescribeIndexAsync("embedding", "embedding");
+                response = await _eventMilvusCollection.DescribeIndexAsync("embedding", EventProcessor.EventCollectionProperties.Embedding);
                 Console.WriteLine("rows left is " + response[0].PendingIndexRows);
                 Console.WriteLine("index done is " + response[0].IndexedRows);
                 Console.WriteLine("state is " + response[0].State);
@@ -476,7 +561,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     uniqueEventsToBeInserted = await GetUniqueEventsToBeInserted(events);
 
                     await AddEventsToQueueAsync(eventsToBeinserted);
-                    await AddEventsToUniquePeopleQueueAsyc(uniqueEventsToBeInserted);
+                    await AddEventsToUniquePeopleQueueAsyc(uniqueEventsToBeInserted, npgsqlConnection);
                     offset = offset + limit;
                     processedEvent += events.Count;
                     Id = events.Last().Id.ToString();
@@ -494,7 +579,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
             npgsqlConnection.Close();
         }
 
-        private static async Task AddEventsToUniquePeopleQueueAsyc(Dictionary<Guid, demofrs> uniqueEventsToBeInserted)
+        private static async Task AddEventsToUniquePeopleQueueAsyc(Dictionary<Guid, demofrs> uniqueEventsToBeInserted, NpgsqlConnection npgsqlConnection)
         {
             try
             {
@@ -527,7 +612,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
                    
                 });
-            
+                await UpdateEventsBaseImageParam(x,npgsqlConnection);
                 return ;
             }
             catch (Exception ex)
@@ -536,6 +621,48 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 return ;
             }
             
+        }
+        private static async Task UpdateEventsBaseImageParam(MutationResult result, NpgsqlConnection npgsqlConnection)
+        {
+            var tableName = "events.\"Face_Recognition\""; // escaping schema/table properly
+            var stringIds = result.Ids.StringIds;
+            if (stringIds is null)
+            {
+                return;
+            }
+
+
+// Prepare values clause for input TrackIds
+            var valuesClause = string.Join(", ", stringIds.Select(id => $"('{id.Replace("'", "''")}')"));
+
+// For the WHERE clause in UPDATE
+            var formattedIds = string.Join(", ", stringIds.Select(id => $"'{id.Replace("'", "''")}'"));
+
+            var query = $@"
+WITH updated AS (
+  UPDATE {tableName}
+  SET ""isBaseImage"" = TRUE
+  WHERE ""TrackId"" IN ({formattedIds}) -- this should be a list of UUIDs in quotes
+  RETURNING ""TrackId""
+),
+input_ids(""TrackId"") AS (
+  VALUES {valuesClause} -- each value should be like ('uuid-value'::uuid)
+)
+SELECT
+  i.""TrackId""
+FROM input_ids i
+LEFT JOIN updated u ON i.""TrackId"" = u.""TrackId"" :: text
+WHERE u.""TrackId"" IS NULL;
+";
+            List<string> notFoundTrackIds;
+         
+                notFoundTrackIds = npgsqlConnection.Query<string>(query).ToList();
+            
+            if (notFoundTrackIds.Any())
+            {
+                Log.Error(
+                    $"The following TrackIds were not found in table {tableName}: {string.Join(", ", notFoundTrackIds)}");
+            }
         }
 
         private static async Task<Dictionary<Guid, demofrs>> GetUniqueEventsToBeInserted(List<demofrs> events)
@@ -551,7 +678,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
 
                 var parameters = new SearchParameters
                 {
-                    OutputFields = { "track_id", "event_id", },
+                    OutputFields = { EventProcessor.EventCollectionProperties.TrackId, EventProcessor.EventCollectionProperties.EventId, },
                     ConsistencyLevel = ConsistencyLevel.Strong,
                     Offset = 0,
                     ExtraParameters = { ["nprobe"] = "128" },
@@ -738,5 +865,146 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 return false;
             }
         }
+        private static string BuildCleanLogsQuery(long time)
+        {
+            string schemaName = "events";
+            string tableName = "Face_Recognition";
+            string formattedTime = time.ToString();
+
+            return $@"
+WITH base_events AS (
+    SELECT * 
+    FROM {schemaName}.""{tableName}""
+    WHERE ""isBaseImage"" = true AND ""Time"" <= '{formattedTime}'
+),
+candidate_events AS (
+    SELECT be.""Id"" AS old_id, ce.""Id"" AS new_id
+    FROM base_events be
+    JOIN LATERAL (
+        SELECT * 
+        FROM {schemaName}.""{tableName}""
+        WHERE ""GroupId"" = be.""GroupId""
+          AND ""Time"" > be.""Time""
+          AND ""faceWeight"" > 0.9
+          AND ""detConf"" > 0.9
+        ORDER BY ""Time"" ASC
+        LIMIT 1
+    ) ce ON true
+),
+update_new_base AS (
+    UPDATE {schemaName}.""{tableName}"" ev
+    SET ""isBaseImage"" = true
+    FROM candidate_events ce
+    WHERE ev.""Id"" = ce.new_id
+    RETURNING ev.""Id"", ev.""TrackId"", ev.""embedding""
+),
+update_old_base AS (
+    UPDATE {schemaName}.""{tableName}"" ev
+    SET ""isBaseImage"" = false
+    FROM candidate_events ce
+    WHERE ev.""Id"" = ce.old_id
+),
+deleted_events AS (
+    DELETE FROM {schemaName}.""{tableName}""
+    WHERE ""Time"" <= '{formattedTime}'
+    RETURNING ""Id""
+)
+SELECT 
+    unb.""Id"" AS Id,
+    unb.""TrackId"" AS TrackId,
+    unb.""embedding""::real[] AS embedding,
+    (SELECT MAX(""Id""::text) FROM deleted_events) AS ""MaxEventId""
+FROM update_new_base unb;
+";
+        }
+
+                public static void cleanLogs(long time)
+                {
+                    NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+                    npgsqlConnection.Open();
+
+                    
+                    string query = BuildCleanLogsQuery(time);
+        
+                    var results = npgsqlConnection.Query<CleanlogsRow>(query);
+        
+                    if (results != null && results.Any())
+                    {
+                        var cleanLogs = new Cleanlogs
+                        {
+                            ReplaceEvents = results.Select(r => new demofrs
+                            {
+                                Id = r.Id,
+                                TrackId = r.TrackId,
+                                embedding = r.embedding
+                            }).ToList(),
+                            MaxEventId = results.FirstOrDefault()?.MaxEventId .ToString()?? string.Empty
+                        };
+                        RemoveEventsFromVectorDb(maxEventId: cleanLogs.MaxEventId).Wait();
+                        AddEventsToVectorDb(cleanLogs.ReplaceEvents,npgsqlConnection);
+        
+                       
+                    }
+                }
+        
+        
+        private static async Task AddEventsToVectorDb(List<demofrs> deletedEvents,
+            NpgsqlConnection npgsqlConnection)
+        {
+            var dy = await GetEventsToBeInserted(deletedEvents);
+            AddEventsToUniquePeopleQueueAsyc(dy,npgsqlConnection);
+        }
+        public static async Task deleteAllEventsByMaxId(string maxEventId)
+        {
+            try
+            {
+                if (!await IsVectorConnectedAsync(_uniquePeopleMilvusClient))
+                {
+                    throw new Exception("Vector is not connected");
+                }
+
+                var expression = $"{EventProcessor.EventCollectionProperties.EventId} <= '{maxEventId}'";
+                _ = await _eventMilvusCollection.DeleteAsync(expression);
+                _ = await _uniquePeopleMilvusCollection.DeleteAsync(expression);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("error in [deleteAllEventsByMaxId] of [UniquepeopleReportManager] " + ex.Message);
+                throw;
+            }
+        }
+        private static async Task RemoveEventsFromVectorDb(string maxEventId)
+        {
+            try
+            {
+                await deleteAllEventsByMaxId(maxEventId);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"error in removing events from vector db: {ex.Message}");
+            }
+        }
+
+
     }
+    
+}
+public class Cleanlogs
+{
+    public List<demofrs> ReplaceEvents { get; set; }
+    public string MaxEventId { get; set; }
+
+    public Cleanlogs()
+    {
+        ReplaceEvents = new List<demofrs>();
+        MaxEventId = string.Empty;
+    }
+}
+// Helper class to match the query result structure
+public class CleanlogsRow
+{
+    public Guid Id { get; set; }
+    public Guid TrackId { get; set; }
+    public float[] embedding { get; set; }
+    public string MaxEventId { get; set; }
 }
