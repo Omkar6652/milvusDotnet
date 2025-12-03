@@ -1,0 +1,1 @@
+User ID=postgres;Password=analytic_server;Host=localhost;Port=5432;Database=largeEnrollment;Pooling=true;Include Error Detail=true;

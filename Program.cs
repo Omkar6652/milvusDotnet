@@ -113,47 +113,47 @@ namespace MyApp
             var startTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             try
             {
-                Task.Factory.StartNew(
-                    () =>
-                    {
-                        while (true)
-                        {
-                            var now = DateTime.Now;
-
-                            if (now.Hour == 2)
-                            {
-                                try
-                                {
-                                    string time = GetRemoveLogsAfter();
-                                    if (string.IsNullOrEmpty(time))
-                                    {
-                                        time = "30";
-                                    }
-
-                                    var checkTime = DateTimeOffset
-                                        .UtcNow.AddDays(-Int32.Parse(time))
-                                        .ToUnixTimeMilliseconds();
-
-                                    cleanLogs(checkTime);
-                                }
-                                catch (Exception ex)
-                                {
-                                    Log.Error($"Error during LogsCleaner execution: {ex.Message}");
-                                }
-                            }
-
-                            Task.Delay(TimeSpan.FromMinutes(15)).Wait();
-                        }
-                    },
-                    TaskCreationOptions.LongRunning
-                );
+                // Task.Factory.StartNew(
+                //     () =>
+                //     {
+                //         while (true)
+                //         {
+                //             var now = DateTime.Now;
+                //
+                //             if (now.Hour == 2)
+                //             {
+                //                 try
+                //                 {
+                //                     string time = GetRemoveLogsAfter();
+                //                     if (string.IsNullOrEmpty(time))
+                //                     {
+                //                         time = "30";
+                //                     }
+                //
+                //                     var checkTime = DateTimeOffset
+                //                         .UtcNow.AddDays(-Int32.Parse(time))
+                //                         .ToUnixTimeMilliseconds();
+                //
+                //                     cleanLogs(checkTime);
+                //                 }
+                //                 catch (Exception ex)
+                //                 {
+                //                     Log.Error($"Error during LogsCleaner execution: {ex.Message}");
+                //                 }
+                //             }
+                //
+                //             Task.Delay(TimeSpan.FromMinutes(15)).Wait();
+                //         }
+                //     },
+                //     TaskCreationOptions.LongRunning
+                // );
                 PrepareMilvus();
-                await RemoveTriggersAndIndexing();
+                // await RemoveTriggersAndIndexing();
     
                 Console.WriteLine("Hello World! started milvusinsertion");
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 await ProcessWatchListCollectionInsertion();
-                await ProcessEventsAndUniquePeopleInsertion();
+                // await ProcessEventsAndUniquePeopleInsertion();
                
                 stopwatch.Stop();
                
@@ -162,15 +162,15 @@ namespace MyApp
                 File.AppendAllTextAsync(timelogTxt, logstring);
                 File.WriteAllText(eventIdFileName, Id);
                 // await ProcessIndexWork(); 
-                Stopwatch stopswatch = Stopwatch.StartNew();
+                // Stopwatch stopswatch = Stopwatch.StartNew();
            
-                await EventProcessor.StartGroupIdAssignWork(DbConnectionString);
-                stopswatch.Stop();
+                // await EventProcessor.StartGroupIdAssignWork(DbConnectionString);
+                // stopswatch.Stop();
                         
-                var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
-                Console.WriteLine(groupidLogString);
+                // var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
+                // Console.WriteLine(groupidLogString);
          
-                File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
+                // File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
             }
             catch (Exception ex)
             {
@@ -396,12 +396,14 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     case enrollmentCollectionName:
                         _watchlistMilvusCollection = milvusCollection;
                         break;
-                    case eventCollectionName:
-                        _eventMilvusCollection = milvusCollection;
-                        break;
-                    case uniquePeopleCollection:
-                        _uniquePeopleMilvusCollection = milvusCollection;
-                        break;
+                    // case eventCollectionName:
+                    //     _eventMilvusCollection = milvusCollection;
+                    //     break;
+                    // case uniquePeopleCollection:
+                    //     _uniquePeopleMilvusCollection = milvusCollection;
+                    //     break;
+                    
+                    
                 }
             }
             catch (Exception e)
@@ -426,30 +428,30 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
         {
             // Initialize separate Milvus clients
             _watchlistMilvusClient = new MilvusClient(MilvusIp, 19530);
-            _eventMilvusClient = new MilvusClient(MilvusIp, 19530);
-            _uniquePeopleMilvusClient = new MilvusClient(MilvusIp, 19530);
+            // _eventMilvusClient = new MilvusClient(MilvusIp, 19530);
+            // _uniquePeopleMilvusClient = new MilvusClient(MilvusIp, 19530);
 
-            var uniquePeopleCollectionSchema = new CollectionSchema
-            {
-                Fields =
-                {
-                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
-                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
-                    FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
-                }
-            };
+            // var uniquePeopleCollectionSchema = new CollectionSchema
+            // {
+            //     Fields =
+            //     {
+            //         FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
+            //         FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
+            //         FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
+            //     }
+            // };
 
-            var eventCollectionSchema = new CollectionSchema
-            {
-                Fields =
-                {
-                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
-                    FieldSchema.Create<long>(EventProcessor.EventCollectionProperties.EventTime),
-                    FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
-                    FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
-                }
-            };
-
+            // var eventCollectionSchema = new CollectionSchema
+            // {
+            //     Fields =
+            //     {
+            //         FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.TrackId, maxLength: 50, isPrimaryKey: true),
+            //         FieldSchema.Create<long>(EventProcessor.EventCollectionProperties.EventTime),
+            //         FieldSchema.CreateVarchar(EventProcessor.EventCollectionProperties.EventId, maxLength: 50),
+            //         FieldSchema.CreateFloatVector(EventProcessor.EventCollectionProperties.Embedding, dimension: 512),
+            //     }
+            // };
+            //
             var schema = new CollectionSchema
             {
                 Fields =
@@ -473,35 +475,35 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 }
             };
 
-            var milvusParams = new MilvusDbInfoParameters()
-            {
-                CollectionName = eventCollectionName,
-                CollectionSchema = eventCollectionSchema,
-                MilvusDbIndexParameters = new MilvusDbIndexParameters()
-                {
-                    FieldName = EventProcessor.EventCollectionProperties.Embedding,
-                    IndexType = IndexType.Flat,
-                    SimilarityMetricType = SimilarityMetricType.Ip,
-                    ExtraParams = new Dictionary<string, string>() { }
-                }
-            };
-
-            var milvusUniquePeopleParams = new MilvusDbInfoParameters()
-            {
-                CollectionName = uniquePeopleCollection,
-                CollectionSchema = uniquePeopleCollectionSchema,
-                MilvusDbIndexParameters = new MilvusDbIndexParameters()
-                {
-                    FieldName = EventProcessor.EventCollectionProperties.Embedding,
-                    IndexType = IndexType.Hnsw,
-                    SimilarityMetricType = SimilarityMetricType.Ip,
-                    ExtraParams = new Dictionary<string, string>() { { "M", "30" }, { "efConstruction", "360" } }
-                }
-            };
+            // var milvusParams = new MilvusDbInfoParameters()
+            // {
+            //     CollectionName = eventCollectionName,
+            //     CollectionSchema = eventCollectionSchema,
+            //     MilvusDbIndexParameters = new MilvusDbIndexParameters()
+            //     {
+            //         FieldName = EventProcessor.EventCollectionProperties.Embedding,
+            //         IndexType = IndexType.Flat,
+            //         SimilarityMetricType = SimilarityMetricType.Ip,
+            //         ExtraParams = new Dictionary<string, string>() { }
+            //     }
+            // };
+            //
+            // var milvusUniquePeopleParams = new MilvusDbInfoParameters()
+            // {
+            //     CollectionName = uniquePeopleCollection,
+            //     CollectionSchema = uniquePeopleCollectionSchema,
+            //     MilvusDbIndexParameters = new MilvusDbIndexParameters()
+            //     {
+            //         FieldName = EventProcessor.EventCollectionProperties.Embedding,
+            //         IndexType = IndexType.Hnsw,
+            //         SimilarityMetricType = SimilarityMetricType.Ip,
+            //         ExtraParams = new Dictionary<string, string>() { { "M", "30" }, { "efConstruction", "360" } }
+            //     }
+            // };
 
             PrepareMilvusDb(_watchlistMilvusClient, watchListMilvusParams).GetAwaiter().GetResult();
-            PrepareMilvusDb(_uniquePeopleMilvusClient, milvusUniquePeopleParams).GetAwaiter().GetResult();
-            PrepareMilvusDb(_eventMilvusClient, milvusParams).GetAwaiter().GetResult();
+            // PrepareMilvusDb(_uniquePeopleMilvusClient, milvusUniquePeopleParams).GetAwaiter().GetResult();
+            // PrepareMilvusDb(_eventMilvusClient, milvusParams).GetAwaiter().GetResult();
         }
 
         public static async Task ProcessIndexWork()

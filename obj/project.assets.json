@@ -2005,11 +2005,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\pomka\\Downloads\\milvusdotnet\\milvusdotnet.csproj",
+      "projectUniqueName": "C:\\WEBPROJECTS\\milvusDotnet\\milvusdotnet.csproj",
       "projectName": "milvusdotnet",
-      "projectPath": "C:\\Users\\pomka\\Downloads\\milvusdotnet\\milvusdotnet.csproj",
+      "projectPath": "C:\\WEBPROJECTS\\milvusDotnet\\milvusdotnet.csproj",
       "packagesPath": "C:\\Users\\pomka\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\pomka\\Downloads\\milvusdotnet\\obj\\",
+      "outputPath": "C:\\WEBPROJECTS\\milvusDotnet\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

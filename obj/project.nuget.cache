@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "skgO6hu+0BE=",
+  "dgSpecHash": "XeTdqL3f5BY=",
   "success": true,
-  "projectFilePath": "C:\\Users\\pomka\\Downloads\\milvusdotnet\\milvusdotnet.csproj",
+  "projectFilePath": "C:\\WEBPROJECTS\\milvusDotnet\\milvusdotnet.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\pomka\\.nuget\\packages\\commandlineparser\\2.9.1\\commandlineparser.2.9.1.nupkg.sha512",
     "C:\\Users\\pomka\\.nuget\\packages\\dapper\\2.1.66\\dapper.2.1.66.nupkg.sha512",
