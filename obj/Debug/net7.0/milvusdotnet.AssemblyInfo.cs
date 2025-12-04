@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("milvusdotnet")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e05a1b9d3f2a2b17c820ca3e5476af674f54e2cb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cd39cd3004d34c1005371c37f6f9518b7f50f5bc")]
 [assembly: System.Reflection.AssemblyProductAttribute("milvusdotnet")]
 [assembly: System.Reflection.AssemblyTitleAttribute("milvusdotnet")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

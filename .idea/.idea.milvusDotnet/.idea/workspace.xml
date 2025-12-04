@@ -8,10 +8,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4db5ac3a-ae0c-4f1e-9d39-706c82e5081a" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.milvusDotnet/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.milvusDotnet/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Program.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/connection_string.txt" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/connection_string.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/groupIdTimeLog.txt" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/groupIdTimeLog.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/last_event_id.txt" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/last_event_id.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/milvus_ip.txt" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/milvus_ip.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/milvusdotnet.dll" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/milvusdotnet.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bin/Debug/net7.0/milvusdotnet.exe" beforeDir="false" afterPath="$PROJECT_DIR$/bin/Debug/net7.0/milvusdotnet.exe" afterDir="false" />
@@ -20,21 +19,16 @@
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/apphost.exe" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/apphost.exe" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.AssemblyInfo.cs" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.AssemblyInfo.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.AssemblyInfoInputs.cache" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.AssemblyInfoInputs.cache" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.GeneratedMSBuildEditorConfig.editorconfig" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.GeneratedMSBuildEditorConfig.editorconfig" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.assets.cache" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.assets.cache" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.csproj.FileListAbsolute.txt" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.csproj.FileListAbsolute.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.dll" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.dll" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.genruntimeconfig.cache" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.genruntimeconfig.cache" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.pdb" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.pdb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.sourcelink.json" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/milvusdotnet.sourcelink.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/ref/milvusdotnet.dll" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/ref/milvusdotnet.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/Debug/net7.0/refint/milvusdotnet.dll" beforeDir="false" afterPath="$PROJECT_DIR$/obj/Debug/net7.0/refint/milvusdotnet.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/milvusdotnet.csproj.nuget.dgspec.json" beforeDir="false" afterPath="$PROJECT_DIR$/obj/milvusdotnet.csproj.nuget.dgspec.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/obj/milvusdotnet.csproj.nuget.g.props" beforeDir="false" afterPath="$PROJECT_DIR$/obj/milvusdotnet.csproj.nuget.g.props" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/project.assets.json" beforeDir="false" afterPath="$PROJECT_DIR$/obj/project.assets.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/project.nuget.cache" beforeDir="false" afterPath="$PROJECT_DIR$/obj/project.nuget.cache" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/project.packagespec.json" beforeDir="false" afterPath="$PROJECT_DIR$/obj/project.packagespec.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/obj/rider.project.model.nuget.info" beforeDir="false" afterPath="$PROJECT_DIR$/obj/rider.project.model.nuget.info" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obj/rider.project.restore.info" beforeDir="false" afterPath="$PROJECT_DIR$/obj/rider.project.restore.info" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,6 +41,12 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/SourcesCache/a6ef4a2dbe9f19bb66d33f102613a63379a6de223e59be253ea73a58df0dc/SqlMapper.Async.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/SourcesCache/d3b35aba78af8938342254c9ab4da7b7362a691ccc71b3decaabd322fea44/Int32.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/SourcesCache/e60b8a28a674789a73bf80f2349c8fd7881cb1ed21fea431b814f1e08598/Convert.cs" root0="SKIP_HIGHLIGHTING" />
+  </component>
+  <component name="MetaFilesCheckinStateConfiguration" checkMetaFiles="true" />
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 5
 }</component>
@@ -59,9 +59,13 @@
   "keyToString": {
     ".NET Project.milvusdotnet.executor": "Debug",
     "Publish to folder.Publish milvusDotnet to folder.executor": "Run",
+    "Publish to folder.Publish milvusdotnet to folder (1).executor": "Run",
+    "Publish to folder.Publish milvusdotnet to folder (2).executor": "Run",
+    "Publish to folder.Publish milvusdotnet to folder (3).executor": "Run",
+    "Publish to folder.Publish milvusdotnet to folder.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "milvusUpdateScriptWork",
+    "git-widget-placeholder": "watchListSyncFromServer",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -73,6 +77,22 @@
   <component name="RunManager" selected=".NET Project.milvusdotnet">
     <configuration name="Publish milvusDotnet to folder" type="DotNetFolderPublish" factoryName="Publish to folder">
       <riderPublish configuration="Release" platform="Any CPU" runtime="win-x64" self_contained="true" target_folder="$PROJECT_DIR$/bin/Release/net7.0/win-x64/publish" target_framework="net7.0" uuid_high="3733948820834791568" uuid_low="4666574408185306653" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Publish milvusdotnet to folder (1)" type="DotNetFolderPublish" factoryName="Publish to folder">
+      <riderPublish configuration="Release" platform="Any CPU" runtime="Portable" target_folder="$PROJECT_DIR$/bin/Release/net7.0/publish" target_framework="net7.0" uuid_high="3733948820834791568" uuid_low="4666574408185306653" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Publish milvusdotnet to folder (2)" type="DotNetFolderPublish" factoryName="Publish to folder">
+      <riderPublish configuration="Release" platform="Any CPU" runtime="Portable" target_folder="$PROJECT_DIR$/bin/Release/net7.0/publish" target_framework="net7.0" uuid_high="3733948820834791568" uuid_low="4666574408185306653" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Publish milvusdotnet to folder (3)" type="DotNetFolderPublish" factoryName="Publish to folder">
+      <riderPublish configuration="Release" platform="Any CPU" runtime="linux-x64" self_contained="true" target_folder="$PROJECT_DIR$/bin/Release/net7.0/linux-x64/publish" target_framework="net7.0" uuid_high="3733948820834791568" uuid_low="4666574408185306653" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Publish milvusdotnet to folder" type="DotNetFolderPublish" factoryName="Publish to folder">
+      <riderPublish configuration="Release" platform="Any CPU" runtime="linux-x64" self_contained="true" target_folder="$PROJECT_DIR$/bin/Release/net7.0/linux-x64/publish" target_framework="net7.0" uuid_high="3733948820834791568" uuid_low="4666574408185306653" />
       <method v="2" />
     </configuration>
     <configuration name="milvusdotnet" type="DotNetProject" factoryName=".NET Project">
@@ -103,15 +123,36 @@
       <option name="presentableId" value="Default" />
       <updated>1763026271824</updated>
       <workItem from="1763026273258" duration="5583000" />
-      <workItem from="1764742626872" duration="415000" />
+      <workItem from="1764742626872" duration="4486000" />
+      <workItem from="1764748153901" duration="10761000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="UnityCheckinConfiguration" checkUnsavedScenes="true" />
   <component name="UnityProjectConfiguration" hasMinimizedUI="false" />
   <component name="VcsManagerConfiguration">
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" type="DotNet Breakpoints">
+          <url>file://$PROJECT_DIR$/Program.cs</url>
+          <line>379</line>
+          <properties documentPath="C:\WEBPROJECTS\milvusDotnet\Program.cs" containingFunctionPresentation="Method 'GetDataFromManagerAndInsertToDb'">
+            <startOffsets>
+              <option value="14129" />
+            </startOffsets>
+            <endOffsets>
+              <option value="14130" />
+            </endOffsets>
+          </properties>
+          <option name="timeStamp" value="15" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
 </project>

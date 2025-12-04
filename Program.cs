@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Dapper;
 using Milvus.Client;
@@ -11,6 +12,7 @@ using MyApp;
 using MyApp.Models;
 using Newtonsoft.Json;
 using Npgsql;
+using Pgvector;
 using Serilog;
 
 namespace MyApp
@@ -22,6 +24,14 @@ namespace MyApp
         public long Time { get; set; }
         public float[] embedding { get; set; }
         public Guid VideoSourceId { get; set; }
+    }
+
+    public class FacePoint
+    {
+        public Vector? Embedding { get; set; }
+        public string? ProvidedImage { get; set; }
+        public Guid Id { get; set; }
+        public string? Image { get; set; }
     }
 
     internal class Program
@@ -38,24 +48,24 @@ namespace MyApp
             "User ID=postgres;Password=postgres;Host=localhost;Port=5438;Database=timescaledb;Pooling=true;Include Error Detail=true;";
 
         public static string EventCollectionName = "demoCollection";
-        
+
         // Separate Milvus clients for each collection
         public static MilvusClient _watchlistMilvusClient;
         public static MilvusClient _eventMilvusClient;
         public static MilvusClient _uniquePeopleMilvusClient;
-        
+
         // Separate Milvus collections
         public static MilvusCollection _watchlistMilvusCollection;
         public static MilvusCollection _eventMilvusCollection;
         public static MilvusCollection _uniquePeopleMilvusCollection;
-        
+
         public static string deletionId;
+
         public static Dictionary<string, List<demofrs>> clusterInfo =
             new Dictionary<string, List<demofrs>>();
 
         static async Task Main(string[] args)
         {
-           
             string eventIdFileName = "last_event_id.txt";
 
             // Check if the file exists
@@ -95,7 +105,7 @@ namespace MyApp
                 MilvusIp = File.ReadAllText(milvusIpFileName);
                 Console.WriteLine($"File already exists. Milvus IP read from file: {MilvusIp}");
             }
-            
+
             timelogTxt = "timeLog.txt";
             groupIdTimeLogText = "groupIdTimeLog.txt";
 
@@ -104,6 +114,7 @@ namespace MyApp
                 File.AppendAllTextAsync(timelogTxt, Id);
                 Console.WriteLine("File created and text written.");
             }
+
             if (!File.Exists(groupIdTimeLogText))
             {
                 File.AppendAllTextAsync(groupIdTimeLogText, Id);
@@ -149,27 +160,37 @@ namespace MyApp
                 // );
                 PrepareMilvus();
                 // await RemoveTriggersAndIndexing();
-    
+
                 Console.WriteLine("Hello World! started milvusinsertion");
                 Stopwatch stopwatch = Stopwatch.StartNew();
+
+                List<FacePoint> watchListData = await getWatchListData();
+
+                Console.Write("Enter Facemanager IP Address: ");
+                string ip =  Console.ReadLine();
+
+                int port = 8090;
+
+             await   GetDataFromManagerAndInsertToDb(ip, port, watchListData);
+                await dropWatchListCollection();
                 await ProcessWatchListCollectionInsertion();
                 // await ProcessEventsAndUniquePeopleInsertion();
-               
+
                 stopwatch.Stop();
-               
+
                 var logstring = $"stopped milvusinsertion. Total time taken: {stopwatch.Elapsed}";
                 Console.WriteLine(logstring);
                 File.AppendAllTextAsync(timelogTxt, logstring);
                 File.WriteAllText(eventIdFileName, Id);
                 // await ProcessIndexWork(); 
                 // Stopwatch stopswatch = Stopwatch.StartNew();
-           
+
                 // await EventProcessor.StartGroupIdAssignWork(DbConnectionString);
                 // stopswatch.Stop();
-                        
+
                 // var groupidLogString = $"stopped groupidwork. Total time taken: {stopswatch.Elapsed}";
                 // Console.WriteLine(groupidLogString);
-         
+
                 // File.AppendAllTextAsync(groupIdTimeLogText, groupidLogString);
             }
             catch (Exception ex)
@@ -181,25 +202,201 @@ namespace MyApp
             Console.WriteLine($"TIME TAKEN {endTime - startTime}");
         }
 
-        private static async Task RemoveTriggersAndIndexing()
+        private static async Task dropWatchListCollection()
+        {
+            await _watchlistMilvusCollection.DropAsync();
+            var schema = new CollectionSchema
+            {
+                Fields =
+                {
+                    FieldSchema.CreateVarchar(WatchListCollectionProperties.FaceId, maxLength: 50, isPrimaryKey: true),
+                    FieldSchema.CreateVarchar(WatchListCollectionProperties.PersonId, maxLength: 50),
+                    FieldSchema.CreateFloatVector(WatchListCollectionProperties.Embedding, dimension: 512)
+                }
+            };
+
+            var watchListMilvusParams = new MilvusDbInfoParameters()
+            {
+                CollectionName = enrollmentCollectionName,
+                CollectionSchema = schema,
+                MilvusDbIndexParameters = new MilvusDbIndexParameters()
+                {
+                    FieldName = WatchListCollectionProperties.Embedding,
+                    IndexType = IndexType.Hnsw,
+                    SimilarityMetricType = SimilarityMetricType.Ip,
+                    ExtraParams = new Dictionary<string, string>() { { "M", "30" }, { "efConstruction", "360" } }
+                }
+            };
+            PrepareMilvusDb(_watchlistMilvusClient, watchListMilvusParams).GetAwaiter().GetResult();
+
+        }
+
+        public class GetEmbeddingResponse
+        {
+            public List<EmbeddingData> data { get; set; }
+            public string message { get; set; }
+            public bool success { get; set; }
+        }
+
+        public class EmbeddingData
+        {
+            public List<float> embedding { get; set; }
+            public string img { get; set; }
+            public dynamic rect { get; set; }
+        }
+
+        public class GetEmbeddingReq
+        {
+            public bool onlyDetectLargestFace { get; set; }
+            public string img { get; set; }
+            public bool fullImageAsFace { get; set; }
+        }
+
+        public static async Task<string> GetBase64String(string imgPath)
+        {
+            if (string.IsNullOrEmpty(imgPath))
+                return null;
+
+            using var client = new HttpClient();
+            string url = $"http://{MilvusIp}:5012/{imgPath}";
+            var res = await client.GetAsync(url);
+            res.EnsureSuccessStatusCode();
+
+            byte[] bytes = await res.Content.ReadAsByteArrayAsync();
+            string base64String = Convert.ToBase64String(bytes);
+
+            return base64String;
+        }
+
+
+
+        private static async Task SaveImgToPath(string newImgBase64, string? facePointImage)
+        {
+            if (string.IsNullOrEmpty(newImgBase64) || string.IsNullOrEmpty(facePointImage))
+                return;
+
+            // Remove base64 prefix if present
+            if (newImgBase64.StartsWith("data:image"))
+            {
+                int commaIndex = newImgBase64.IndexOf(",");
+                newImgBase64 = newImgBase64.Substring(commaIndex + 1);
+            }
+
+            // Decode base64 to bytes
+            byte[] imageBytes = Convert.FromBase64String(newImgBase64);
+
+            // Determine file name
+            string fileName = Path.GetFileName(facePointImage);
+
+#if DEBUG
+            string rootPath = @"C:\WEBPROJECTS\Am3\analytic_manager\Analytic\EmbededImages";
+#else
+    string rootPath = Path.Combine(Directory.GetCurrentDirectory(), "../EmbededImages");
+#endif
+
+            // Create folder if missing
+            if (!Directory.Exists(rootPath))
+                Directory.CreateDirectory(rootPath);
+
+            string fullPath = Path.Combine(rootPath, fileName);
+
+            // Save/replace file
+            await File.WriteAllBytesAsync(fullPath, imageBytes);
+
+            Console.WriteLine($"Image saved → {fullPath}");
+        }
+
+        private static async Task GetDataFromManagerAndInsertToDb(
+            string? ip,
+            int port,
+            List<FacePoint> watchListData)
+        {
+            HttpClient faceDetectorClient = new HttpClient()
+            {
+                BaseAddress = new Uri($"http://{ip}:{port}")
+            };
+
+            foreach (var facePoint in watchListData)
+            {
+                try
+                {
+                    string imageInput = facePoint.ProvidedImage;
+
+                    // Clean or convert input
+                    if (imageInput.StartsWith("data:image/png;base64,"))
+                    {
+                        imageInput = imageInput.Substring("data:image/png;base64,".Length);
+                    }
+                    else if (imageInput.Contains(".")) // file path
+                    {
+                        imageInput = await GetBase64String(imageInput);
+                    }
+
+                    var req = new GetEmbeddingReq
+                    {
+                        img = imageInput,
+                        onlyDetectLargestFace = false,
+                        fullImageAsFace = false
+                    };
+
+                    var content = new StringContent(
+                        JsonConvert.SerializeObject(req),
+                        Encoding.UTF8,
+                        "application/json"
+                    );
+
+                    var response = await faceDetectorClient.PostAsync("/embed", content);
+
+                    if (response.StatusCode != System.Net.HttpStatusCode.OK)
+                    {
+                        Console.WriteLine($"❌ Failed HTTP for FacePoint {facePoint.Id}");
+                        continue; // skip
+                    }
+
+                    var res = await response.Content.ReadAsStringAsync();
+
+                    var resp = JsonConvert.DeserializeObject<GetEmbeddingResponse>(
+                        res.Trim('\"').Replace("\\\"", "\"")
+                    );
+
+                    if (resp.success == false)
+                    {
+                        Console.WriteLine($"❌ API Error for FacePoint {facePoint.Id}: {resp.message}");
+                        continue;
+                    }
+
+                    // → Here is the embedding result
+                    var newEmbedding = resp.data[0].embedding;
+var newImg = resp.data[0].img;
+                    // Update DB
+                    await UpdateEmbeddingInDb(facePoint.Id, newEmbedding);
+                    await SaveImgToPath(newImg,facePoint.Image);
+                    Console.WriteLine($"✔ Updated embedding for FacePoint {facePoint.Id}");
+                }
+                catch (Exception ex)
+                {
+                    // logs and continues
+                    Console.WriteLine($" Exception for FacePoint {facePoint.Id}: {ex.Message}");
+                }
+            }
+        }
+
+
+        private static async Task<bool> UpdateEmbeddingInDb(Guid facePointId, List<float> newEmbedding )
         {
             using var npgsqlConnection = new NpgsqlConnection(DbConnectionString);
             try
             {
                 await npgsqlConnection.OpenAsync();
+                float[] embeddingArray = newEmbedding.ToArray();
+                string vectorString = "[" + string.Join(",", embeddingArray) + "]";
 
-                // Drop existing objects if they exist
-                string dropQuery = @"
-            -- Drop the trigger if it exists
-            DROP TRIGGER IF EXISTS before_insert_face_recognition ON events.""Face_Recognition"";
+                string updateQuery =
+                    $"UPDATE public.\"FacePoint\" SET \"Embedding\" = '{vectorString}' WHERE \"Id\" = '{facePointId}'";
 
-            -- Drop the function if it exists
-            DROP FUNCTION IF EXISTS events.assign_group_id_to_frs_events();
 
-            -- Drop the index if it exists
-            DROP INDEX IF EXISTS ""FacePoint_embedding_idx"";";
-
-                await npgsqlConnection.ExecuteAsync(dropQuery);
+                await npgsqlConnection.ExecuteAsync(updateQuery);
+                return true;
             }
             catch (Exception ex)
             {
@@ -214,107 +411,172 @@ namespace MyApp
                     npgsqlConnection.Close();
                 }
             }
+
         }
 
-        private static string GetRemoveLogsAfter()
-        {
-            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
-            npgsqlConnection.Open();
-           var query = "SELECT \"Value\" FROM public.\"SystemConfig\" where  \"Key\" = 'RemoveEventLogsAfter'" ;
+        private static async Task<List<FacePoint>> getWatchListData()
+            {
+                using var npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+                try
+                {
+                    await npgsqlConnection.OpenAsync();
+
+        
+                    string getQuery = "SELECT \"ProvidedImage\", \"Id\", \"Image\" FROM public.\"FacePoint\" ORDER BY \"Id\" ASC";
+                    var result = await npgsqlConnection.QueryAsync<FacePoint>(getQuery);
+
+                    return result.ToList();
+                }
+                catch (Exception ex)
+                {
+                    // Log the exception or handle it as needed
+                    Console.WriteLine($"Error removing triggers and indexing: {ex.Message}");
+                    throw; // Re-throw if you want calling code to handle it
+                }
+                finally
+                {
+                    if (npgsqlConnection.State == System.Data.ConnectionState.Open)
+                    {
+                        npgsqlConnection.Close();
+                    }
+                }
+            }
+
+            private static async Task RemoveTriggersAndIndexing()
+            {
+                using var npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+                try
+                {
+                    await npgsqlConnection.OpenAsync();
+
+                    // Drop existing objects if they exist
+                    string dropQuery = @"
+            -- Drop the trigger if it exists
+            DROP TRIGGER IF EXISTS before_insert_face_recognition ON events.""Face_Recognition"";
+
+            -- Drop the function if it exists
+            DROP FUNCTION IF EXISTS events.assign_group_id_to_frs_events();
+
+            -- Drop the index if it exists
+            DROP INDEX IF EXISTS ""FacePoint_embedding_idx"";";
+
+                    await npgsqlConnection.ExecuteAsync(dropQuery);
+                }
+                catch (Exception ex)
+                {
+                    // Log the exception or handle it as needed
+                    Console.WriteLine($"Error removing triggers and indexing: {ex.Message}");
+                    throw; // Re-throw if you want calling code to handle it
+                }
+                finally
+                {
+                    if (npgsqlConnection.State == System.Data.ConnectionState.Open)
+                    {
+                        npgsqlConnection.Close();
+                    }
+                }
+            }
+
+            private static string GetRemoveLogsAfter()
+            {
+                NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+                npgsqlConnection.Open();
+                var query = "SELECT \"Value\" FROM public.\"SystemConfig\" where  \"Key\" = 'RemoveEventLogsAfter'";
 
 
-            var watchListItems = npgsqlConnection
-                .Query<string>(query)
-                .ToList();
-            return watchListItems[0];
-        }
+                var watchListItems = npgsqlConnection
+                    .Query<string>(query)
+                    .ToList();
+                return watchListItems[0];
+            }
 
-        private static async Task ProcessWatchListCollectionInsertion()
-{
-    NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
-    npgsqlConnection.Open();
-    
-    try
-    {
-        var processedCount = 0;
-        var limit = 1000;
-        var offset = 0;
+            private static async Task ProcessWatchListCollectionInsertion()
+            {
+                NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+                npgsqlConnection.Open();
 
-        while (true)
-        {
-            Console.WriteLine("Processing WatchList Collection Insertion...");
-            Stopwatch stopwatch = Stopwatch.StartNew();
+                try
+                {
+                    var processedCount = 0;
+                    var limit = 1000;
+                    var offset = 0;
 
-            var query = $@"
+                    while (true)
+                    {
+                        Console.WriteLine("Processing WatchList Collection Insertion...");
+                        Stopwatch stopwatch = Stopwatch.StartNew();
+
+                        var query = $@"
                 SELECT ""Id"" as FaceId, ""PersonId"", ""Embedding""::real[] as Embeddings 
                 FROM public.""FacePoint"" 
                 ORDER BY ""Id"" 
                 OFFSET {offset} 
                 LIMIT {limit}";
 
-            var watchListItems = npgsqlConnection
-                .Query<WatchListCollectionModel>(query)
-                .ToList();
+                        var watchListItems = npgsqlConnection
+                            .Query<WatchListCollectionModel>(query)
+                            .ToList();
 
-            if (watchListItems.Count == 0)
-            {
-                break;
+                        if (watchListItems.Count == 0)
+                        {
+                            break;
+                        }
+
+                        await InsertWatchListItems(watchListItems);
+
+                        offset += limit;
+                        processedCount += watchListItems.Count;
+
+                        stopwatch.Stop();
+                        var logstring =
+                            $"WatchList Insertion Done: {processedCount} Total time taken: {stopwatch.Elapsed}";
+                        Console.WriteLine(logstring);
+                        File.AppendAllTextAsync(timelogTxt, logstring);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
+                    Log.Error($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
+                }
+                finally
+                {
+                    npgsqlConnection.Close();
+                }
             }
 
-            await InsertWatchListItems(watchListItems);
-            
-            offset += limit;
-            processedCount += watchListItems.Count;
-            
-            stopwatch.Stop();
-            var logstring = $"WatchList Insertion Done: {processedCount} Total time taken: {stopwatch.Elapsed}";
-            Console.WriteLine(logstring);
-            File.AppendAllTextAsync(timelogTxt, logstring);
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
-        Log.Error($"Error in ProcessWatchListCollectionInsertion: {ex.Message}");
-    }
-    finally
-    {
-        npgsqlConnection.Close();
-    }
-}
+            private static async Task<bool> InsertWatchListItems(List<WatchListCollectionModel> items)
+            {
+                try
+                {
+                    if (items.Count == 0)
+                    {
+                        return true;
+                    }
 
-private static async Task<bool> InsertWatchListItems(List<WatchListCollectionModel> items)
-{
-    try
-    {
-        if (items.Count == 0)
-        {
-            return true;
-        }
+                    List<ReadOnlyMemory<float>> embeddings = items
+                        .Select(e => new ReadOnlyMemory<float>(e.Embeddings.ToArray()))
+                        .ToList();
 
-        List<ReadOnlyMemory<float>> embeddings = items
-            .Select(e => new ReadOnlyMemory<float>(e.Embeddings.ToArray()))
-            .ToList();
+                    var result = await _watchlistMilvusCollection.UpsertAsync(new FieldData[]
+                    {
+                        FieldData.Create(WatchListCollectionProperties.FaceId,
+                            items.Select(x => x.FaceId.ToString()).ToList()),
+                        FieldData.Create(WatchListCollectionProperties.PersonId,
+                            items.Select(x => x.PersonId.ToString()).ToList()),
+                        FieldData.CreateFloatVector(WatchListCollectionProperties.Embedding, embeddings)
+                    });
 
-        var result = await _watchlistMilvusCollection.UpsertAsync(new FieldData[]
-        {
-            FieldData.Create(WatchListCollectionProperties.FaceId,
-                items.Select(x => x.FaceId.ToString()).ToList()),
-            FieldData.Create(WatchListCollectionProperties.PersonId,
-                items.Select(x => x.PersonId.ToString()).ToList()),
-            FieldData.CreateFloatVector(WatchListCollectionProperties.Embedding, embeddings)
-        });
-
-        Console.WriteLine($"Inserted {items.Count} items into WatchList collection");
-        return true;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error inserting WatchList items: {ex.Message}");
-        Log.Error($"Error inserting WatchList items: {ex.Message}");
-        return false;
-    }
-}
+                    Console.WriteLine($"Inserted {items.Count} items into WatchList collection");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error inserting WatchList items: {ex.Message}");
+                    Log.Error($"Error inserting WatchList items: {ex.Message}");
+                    return false;
+                }
+            }
 
         public class MilvusDbInfoParameters
         {
@@ -365,7 +627,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                         Log.Error($"Successfully connected to Milvus DB on attempt {attempt}");
                         break;
                     }
-    
+
                     Log.Error($"Milvus DB connection attempt {attempt} failed. Retrying in {retryDelayMs}ms...");
                     await Task.Delay(retryDelayMs);
                 }
@@ -374,7 +636,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 {
                     var collection = await client.CreateCollectionAsync(milvusDbInfoParameters.CollectionName,
                         milvusDbInfoParameters.CollectionSchema, consistencyLevel: ConsistencyLevel.Strong);
-                    
+
                     await collection.CreateIndexAsync(milvusDbInfoParameters.MilvusDbIndexParameters.FieldName,
                         indexType: milvusDbInfoParameters.MilvusDbIndexParameters.IndexType,
                         metricType: milvusDbInfoParameters.MilvusDbIndexParameters.SimilarityMetricType,
@@ -384,12 +646,13 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 }
                 else
                 {
-                    Log.Information($"Connected to existing Milvus collection: {milvusDbInfoParameters.CollectionName}");
+                    Log.Information(
+                        $"Connected to existing Milvus collection: {milvusDbInfoParameters.CollectionName}");
                 }
 
                 var milvusCollection = client.GetCollection(milvusDbInfoParameters.CollectionName);
                 await milvusCollection.LoadAsync();
-                
+
                 // Assign to appropriate collection based on name
                 switch (milvusDbInfoParameters.CollectionName)
                 {
@@ -402,8 +665,6 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     // case uniquePeopleCollection:
                     //     _uniquePeopleMilvusCollection = milvusCollection;
                     //     break;
-                    
-                    
                 }
             }
             catch (Exception e)
@@ -508,10 +769,13 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
 
         public static async Task ProcessIndexWork()
         {
-            var response = await _eventMilvusCollection.DescribeIndexAsync("embedding",EventProcessor.EventCollectionProperties.Embedding);
+            var response =
+                await _eventMilvusCollection.DescribeIndexAsync("embedding",
+                    EventProcessor.EventCollectionProperties.Embedding);
             while (response[0].PendingIndexRows != 0)
             {
-                response = await _eventMilvusCollection.DescribeIndexAsync("embedding", EventProcessor.EventCollectionProperties.Embedding);
+                response = await _eventMilvusCollection.DescribeIndexAsync("embedding",
+                    EventProcessor.EventCollectionProperties.Embedding);
                 Console.WriteLine("rows left is " + response[0].PendingIndexRows);
                 Console.WriteLine("index done is " + response[0].IndexedRows);
                 Console.WriteLine("state is " + response[0].State);
@@ -540,17 +804,19 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     var events = npgsqlConnection
                         .Query<demofrs>(getFaceEventsFromDbQuery)
                         .ToList();
-                    
+
                     if (events.Count == 0)
                     {
                         break;
                     }
+
                     foreach (var evt in events)
                     {
                         if (evt.Time <= 0)
                         {
                             Console.WriteLine($"Warning: Event {evt.Id} has invalid time: {evt.Time}");
                         }
+
                         if (evt.embedding == null || evt.embedding.Length == 0)
                         {
                             Console.WriteLine($"Warning: Event {evt.Id} has null or empty embedding");
@@ -568,7 +834,8 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     processedEvent += events.Count;
                     Id = events.Last().Id.ToString();
                     stopwatch.Stop();
-                    var logstring = "ProcessEventsNotHavingGroupIds Done : " + processedEvent + " Total time taken: " + stopwatch.Elapsed;
+                    var logstring = "ProcessEventsNotHavingGroupIds Done : " + processedEvent + " Total time taken: " +
+                                    stopwatch.Elapsed;
                     Console.WriteLine(logstring);
                     File.AppendAllTextAsync(timelogTxt, logstring);
                 }
@@ -581,13 +848,14 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
             npgsqlConnection.Close();
         }
 
-        private static async Task AddEventsToUniquePeopleQueueAsyc(Dictionary<Guid, demofrs> uniqueEventsToBeInserted, NpgsqlConnection npgsqlConnection)
+        private static async Task AddEventsToUniquePeopleQueueAsyc(Dictionary<Guid, demofrs> uniqueEventsToBeInserted,
+            NpgsqlConnection npgsqlConnection)
         {
             try
             {
                 if (uniqueEventsToBeInserted.Count == 0)
                 {
-                    return ;
+                    return;
                 }
 
                 // var trackIdSet = new HashSet<string>();
@@ -604,7 +872,7 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                 List<ReadOnlyMemory<float>> embeddings = events
                     .Select(e => new ReadOnlyMemory<float>(e.embedding))
                     .ToList();
-                
+
                 var x = await _uniquePeopleMilvusCollection.UpsertAsync(new FieldData[]
                 {
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.TrackId}",
@@ -612,18 +880,17 @@ private static async Task<bool> InsertWatchListItems(List<WatchListCollectionMod
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.EventId}",
                         events.Select(x => x.Id.ToString()).ToList()),
                     FieldData.CreateFloatVector($"{EventProcessor.EventCollectionProperties.Embedding}", embeddings),
-                   
                 });
-                await UpdateEventsBaseImageParam(x,npgsqlConnection);
-                return ;
+                await UpdateEventsBaseImageParam(x, npgsqlConnection);
+                return;
             }
             catch (Exception ex)
             {
                 Log.Error(ex.Message);
-                return ;
+                return;
             }
-            
         }
+
         private static async Task UpdateEventsBaseImageParam(MutationResult result, NpgsqlConnection npgsqlConnection)
         {
             var tableName = "events.\"Face_Recognition\""; // escaping schema/table properly
@@ -657,9 +924,9 @@ LEFT JOIN updated u ON i.""TrackId"" = u.""TrackId"" :: text
 WHERE u.""TrackId"" IS NULL;
 ";
             List<string> notFoundTrackIds;
-         
-                notFoundTrackIds = npgsqlConnection.Query<string>(query).ToList();
-            
+
+            notFoundTrackIds = npgsqlConnection.Query<string>(query).ToList();
+
             if (notFoundTrackIds.Any())
             {
                 Log.Error(
@@ -680,7 +947,11 @@ WHERE u.""TrackId"" IS NULL;
 
                 var parameters = new SearchParameters
                 {
-                    OutputFields = { EventProcessor.EventCollectionProperties.TrackId, EventProcessor.EventCollectionProperties.EventId, },
+                    OutputFields =
+                    {
+                        EventProcessor.EventCollectionProperties.TrackId,
+                        EventProcessor.EventCollectionProperties.EventId,
+                    },
                     ConsistencyLevel = ConsistencyLevel.Strong,
                     Offset = 0,
                     ExtraParameters = { ["nprobe"] = "128" },
@@ -710,6 +981,7 @@ WHERE u.""TrackId"" IS NULL;
             {
                 Console.WriteLine(ex.Message);
             }
+
             return null;
         }
 
@@ -720,13 +992,11 @@ WHERE u.""TrackId"" IS NULL;
                 if (!events.Any())
                     return new Dictionary<Guid, demofrs>();
 
-            
 
                 var toInsert = new Dictionary<Guid, demofrs>();
                 for (int i = 0; i < events.Count; i++)
                 {
-              
-                        toInsert.TryAdd(events[i].TrackId, events[i]);
+                    toInsert.TryAdd(events[i].TrackId, events[i]);
                 }
 
                 return toInsert;
@@ -735,9 +1005,10 @@ WHERE u.""TrackId"" IS NULL;
             {
                 Console.WriteLine(ex.Message);
             }
+
             return null;
         }
-    
+
         // private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
         // {
         //     if (!toInsert.Any())
@@ -774,15 +1045,12 @@ WHERE u.""TrackId"" IS NULL;
         //
         //     return insert;
         // }
-        
+
         private static Dictionary<Guid, demofrs> PostProcessInsertion(Dictionary<Guid, demofrs> toInsert)
         {
             if (!toInsert.Any())
                 return toInsert;
-            
-           
 
-            
 
             var insert = new Dictionary<Guid, demofrs>();
             var clusters = new List<ReadOnlyMemory<float>>();
@@ -815,7 +1083,7 @@ WHERE u.""TrackId"" IS NULL;
         private static bool ShouldInsertEvent(SearchResults searchResults, int index)
         {
             const float similarityThreshold = 0.5f;
-    
+
             if (searchResults is null || searchResults.Scores.Count < 1)
             {
                 return true;
@@ -847,7 +1115,7 @@ WHERE u.""TrackId"" IS NULL;
                 List<ReadOnlyMemory<float>> embeddings = events
                     .Select(e => new ReadOnlyMemory<float>(e.embedding))
                     .ToList();
-                
+
                 var x = await _eventMilvusCollection.UpsertAsync(new FieldData[]
                 {
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.TrackId}",
@@ -858,7 +1126,7 @@ WHERE u.""TrackId"" IS NULL;
                     FieldData.Create($"{EventProcessor.EventCollectionProperties.EventTime}",
                         events.Select(x => x.Time).ToList()),
                 });
-            
+
                 return true;
             }
             catch (Exception ex)
@@ -867,6 +1135,7 @@ WHERE u.""TrackId"" IS NULL;
                 return false;
             }
         }
+
         private static string BuildCleanLogsQuery(long time)
         {
             string schemaName = "events";
@@ -920,42 +1189,41 @@ FROM update_new_base unb;
 ";
         }
 
-                public static void cleanLogs(long time)
-                {
-                    NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
-                    npgsqlConnection.Open();
+        public static void cleanLogs(long time)
+        {
+            NpgsqlConnection npgsqlConnection = new NpgsqlConnection(DbConnectionString);
+            npgsqlConnection.Open();
 
-                    
-                    string query = BuildCleanLogsQuery(time);
-        
-                    var results = npgsqlConnection.Query<CleanlogsRow>(query);
-        
-                    if (results != null && results.Any())
+
+            string query = BuildCleanLogsQuery(time);
+
+            var results = npgsqlConnection.Query<CleanlogsRow>(query);
+
+            if (results != null && results.Any())
+            {
+                var cleanLogs = new Cleanlogs
+                {
+                    ReplaceEvents = results.Select(r => new demofrs
                     {
-                        var cleanLogs = new Cleanlogs
-                        {
-                            ReplaceEvents = results.Select(r => new demofrs
-                            {
-                                Id = r.Id,
-                                TrackId = r.TrackId,
-                                embedding = r.embedding
-                            }).ToList(),
-                            MaxEventId = results.FirstOrDefault()?.MaxEventId .ToString()?? string.Empty
-                        };
-                        RemoveEventsFromVectorDb(maxEventId: cleanLogs.MaxEventId).Wait();
-                        AddEventsToVectorDb(cleanLogs.ReplaceEvents,npgsqlConnection);
-        
-                       
-                    }
-                }
-        
-        
+                        Id = r.Id,
+                        TrackId = r.TrackId,
+                        embedding = r.embedding
+                    }).ToList(),
+                    MaxEventId = results.FirstOrDefault()?.MaxEventId.ToString() ?? string.Empty
+                };
+                RemoveEventsFromVectorDb(maxEventId: cleanLogs.MaxEventId).Wait();
+                AddEventsToVectorDb(cleanLogs.ReplaceEvents, npgsqlConnection);
+            }
+        }
+
+
         private static async Task AddEventsToVectorDb(List<demofrs> deletedEvents,
             NpgsqlConnection npgsqlConnection)
         {
             var dy = await GetEventsToBeInserted(deletedEvents);
-            AddEventsToUniquePeopleQueueAsyc(dy,npgsqlConnection);
+            AddEventsToUniquePeopleQueueAsyc(dy, npgsqlConnection);
         }
+
         public static async Task deleteAllEventsByMaxId(string maxEventId)
         {
             try
@@ -975,6 +1243,7 @@ FROM update_new_base unb;
                 throw;
             }
         }
+
         private static async Task RemoveEventsFromVectorDb(string maxEventId)
         {
             try
@@ -986,11 +1255,9 @@ FROM update_new_base unb;
                 Log.Error($"error in removing events from vector db: {ex.Message}");
             }
         }
-
-
     }
-    
 }
+
 public class Cleanlogs
 {
     public List<demofrs> ReplaceEvents { get; set; }
@@ -1002,6 +1269,7 @@ public class Cleanlogs
         MaxEventId = string.Empty;
     }
 }
+
 // Helper class to match the query result structure
 public class CleanlogsRow
 {
